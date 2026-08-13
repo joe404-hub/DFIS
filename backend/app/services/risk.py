@@ -66,7 +66,8 @@ def score_case(events: list[dict], groups: list[dict]) -> dict:
         for e in events
         if e.get("source_type") in {"network", "browser"} and e.get("timestamp")
     ]
-    if copy_times and net_ev:
+    documented_transfer = bool(copies) or "file_copy" in blob or "e:/transfer" in blob or "e:\\transfer" in blob
+    if documented_transfer and net_ev:
         fire("network_after")
     elif net_ev or any(e.get("source_type") in {"network", "browser"} for e in events):
         fire("network")
@@ -75,6 +76,9 @@ def score_case(events: list[dict], groups: list[dict]) -> dict:
     if any(len(g.get("source_event_ids") or []) >= 2 for g in groups):
         fire("multi_source")
 
+    if any(i["id"] == "network_after" for i in fired) and not documented_transfer:
+        fired = [i for i in fired if i["id"] != "network_after"]
+        fire("network")
     raw = sum(i["points"] for i in fired)
     score = min(100, raw)
     return {

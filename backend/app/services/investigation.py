@@ -277,9 +277,12 @@ def investigation_narrative(cls: dict, groups: list[dict], chain: list[dict], ra
         )
     lines.append("")
     lines.append("CASE-SPECIFIC EVIDENCE (authoritative for this case):")
-    for g in groups:
-        dest = f" dest={g['destination']}" if g.get("destination") else ""
-        lines.append(f"- {g['timestamp']} {g['family']} {g['entity']}{dest} evidence_ids={g['source_event_ids']}")
+    if groups:
+        for g in groups:
+            dest = f" dest={g['destination']}" if g.get("destination") else ""
+            lines.append(f"- {g['timestamp']} {g['family']} {g['entity']}{dest} evidence_ids={g['source_event_ids']}")
+    else:
+        lines.append("None of the available events establish significant suspicious activity.")
     if rag.get("knowledge"):
         lines.append("")
         lines.append("GENERAL FORENSIC KNOWLEDGE (interpretive only — do not treat as CASE001 events):")
@@ -401,6 +404,8 @@ def _benign_answer(inv: dict) -> str:
             f"The case is currently classified as Possible {inv.get('category')} / {inv.get('secondary')}, "
             f"with an investigation priority of {score}/100 ({pri}). "
             "No correlated multi-source activity supports an insider-threat or data-exfiltration hypothesis.",
+            "",
+            "CASE-SPECIFIC EVIDENCE (authoritative for this case): None of the available events establish significant suspicious activity.",
             "",
             "Ordinary network/browser activity may be present, but this alone does not establish exfiltration. "
             "There is no case-specific evidence presented for USB transfer, sensitive-file copying, "
