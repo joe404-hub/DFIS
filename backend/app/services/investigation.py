@@ -370,7 +370,7 @@ def _priority_line(inv: dict) -> str:
     return (
         f"Working classification: Possible {inv.get('category')} / "
         f"{inv.get('secondary') or 'review required'} "
-        f"(Risk Priority: {score}/100 — {pri}). "
+        f"(Investigation Priority: {score}/100 — {pri}). "
         "This is investigation priority, not a probability of crime."
     )
 
@@ -378,43 +378,84 @@ def _priority_line(inv: dict) -> str:
 def _usb_transfer_answer(inv: dict, events: list[dict]) -> str | None:
     copies = [g for g in (inv.get("correlations") or []) if g.get("family") == "file_copy"]
     usb = [g for g in (inv.get("correlations") or []) if g.get("family") in {"usb_connect", "usb_remove"}]
+    accesses = [g for g in (inv.get("correlations") or []) if g.get("family") == "file_access"]
     if not copies:
         copies = [
             {
                 "entity": e.get("target"),
                 "destination": e.get("destination_path") or e.get("target"),
                 "source_event_ids": [e.get("id")],
+                "timestamp": e.get("timestamp"),
             }
             for e in events
             if e.get("event_type") == "file_copy"
         ]
     if not copies:
         return None
+
     dests = sorted({(c.get("destination") or "E:/Transfer") for c in copies})
-    copy_ids = []
+    dest = dests[0] if dests else "E:/Transfer"
+    copy_ids, usb_ids, access_ids = [], [], []
     for c in copies:
         copy_ids.extend(c.get("source_event_ids") or [])
-    usb_ids = []
     for u in usb:
         usb_ids.extend(u.get("source_event_ids") or [])
-    files = ", ".join(sorted({str(c.get("entity") or "?") for c in copies}))
-    dest = dests[0] if dests else "a transfer path"
-    usb_clause = (
-        f" A removable device was connected shortly beforehand (evidence_ids={usb_ids})." if usb_ids else ""
-    )
-    return (
-        f"Grounded answer: Evidence shows that {files} were copied to {dest} "
-        f"(evidence_ids={copy_ids}).{usb_clause} "
-        f"The available evidence therefore supports a possible USB/removable-media transfer, "
-        f"but does not conclusively prove that {dest} corresponds to that USB device. "
-        "Drive/device mapping should be verified before stating the files were copied specifically to USB."
+    for a in accesses:
+        access_ids.extend(a.get("source_event_ids") or [])
+
+    ev_lines = []
+    for g in usb + accesses + copies:
+        ts = str(g.get("timestamp") or "")[:19].replace("T", " ")
+        ent = g.get("entity") or ""
+        destg = g.get("destination") or ""
+        if g.get("family") == "usb_connect":
+            ev_lines.append(f"  {ts}  USB/removable media connected  evidence_ids={g.get('source_event_ids')}")
+        elif g.get("family") == "file_access":
+            ev_lines.append(f"  {ts}  {ent} accessed  evidence_ids={g.get('source_event_ids')}")
+        elif g.get("family") == "file_copy":
+            ev_lines.append(f"  {ts}  {ent} → {destg or dest}  evidence_ids={g.get('source_event_ids')}")
+
+    support = []
+    for ids in (usb_ids, access_ids, copy_ids):
+        support.extend(ids)
+    support = list(dict.fromkeys(support))
+    score = inv.get("risk_score")
+    pri = inv.get("priority") or (inv.get("risk") or {}).get("priority") or "HIGH PRIORITY"
+
+    return "\n".join(
+        [
+            "Grounded assessment: Possible, but not conclusively established.",
+            "",
+            "CASE evidence",
+            *ev_lines,
+            "",
+            "Interpretation",
+            "  Possible removable-media data transfer",
+            "  Confidence: Medium",
+            "  Status: Hypothesized (temporal correlation, not device identity)",
+            "",
+            "Missing evidence",
+            "  No direct drive-letter-to-USB-device mapping shown",
+            "  No explicit USB file-write event shown",
+            "  No cryptographic/hash confirmation of copied files shown",
+            "",
+            f"The evidence indicates that confidential files were copied to {dest} after a removable USB device was connected. "
+            f"However, the available evidence does not conclusively establish that {dest} was the connected USB device. "
+            "Therefore, a USB transfer is possible/strongly suspected but not conclusively proven from the currently retrieved evidence.",
+            "",
+            "Conclusion: Possible USB/removable-media transfer; further verification of the drive/device mapping is required.",
+            "Confidence: Medium",
+            f"Supporting evidence: {support}",
+            f"Investigation Priority: {score}/100 — {pri}",
+        ]
     )
 
 
 def answer_from_investigation(question: str, events: list[dict], inv: dict) -> str:
     q = question.lower()
     lines = [
-        "**Investigation answer** (grounded in the correlated timeline, not the ZIP).",
+        "Was confidential data copied to USB?" if "usb" in q or "copied" in q else f"Question: {question}",
+        "",
         _priority_line(inv),
         "",
     ]
@@ -423,26 +464,25 @@ def answer_from_investigation(question: str, events: list[dict], inv: dict) -> s
         if usb_ans:
             lines.append(usb_ans)
             lines.append("")
-    groups = inv.get("correlations") or []
-    scored = []
-    toks = {t for t in re.findall(r"[a-z0-9._-]{3,}", q)}
-    for g in groups:
-        blob = (g.get("brief") or "").lower()
-        scored.append((sum(1 for t in toks if t in blob), g))
-    scored.sort(key=lambda x: -x[0])
-    use = [g for s, g in scored if s > 0][:6] or [g for _, g in scored[:5]]
-    lines.append("Supporting correlated activities and their evidence event IDs:")
-    for g in use:
-        lines.append(
-            f"- {g['timestamp']} {g['family']} {g['entity']} link={g['correlation_id']} "
-            f"evidence_ids={g['source_event_ids']}"
-        )
-        for s in g["sources"][:4]:
-            lines.append(f"    event_id={s['event_id']} {s['source_type']} {s['source_file']}: {s['description']}")
-    lines.append("")
-    lines.append("GENERAL FORENSIC KNOWLEDGE (interpretive only — not CASE events):")
+    else:
+        groups = inv.get("correlations") or []
+        toks = {t for t in re.findall(r"[a-z0-9._-]{3,}", q)}
+        scored = []
+        for g in groups:
+            blob = (g.get("brief") or "").lower()
+            scored.append((sum(1 for t in toks if t in blob), g))
+        scored.sort(key=lambda x: -x[0])
+        use = [g for s, g in scored if s > 0][:6] or [g for _, g in scored[:5]]
+        lines.append("CASE-SPECIFIC EVIDENCE")
+        for g in use:
+            lines.append(
+                f"- {g['timestamp']} {g['family']} {g['entity']} evidence_ids={g['source_event_ids']}"
+            )
+        lines.append("")
+    lines.append("GENERAL FORENSIC KNOWLEDGE (interpretive only — not CASE events; do not infer absent events such as archive creation):")
     for k in (inv.get("rag") or {}).get("knowledge") or []:
         lines.append(f"- {k}")
         break
-    lines.append("\n_AI is an assistant, not an evidence source. Correlation IDs are links._")
+    lines.append("")
+    lines.append("AI is an investigative assistant, not an evidence source. Verify conclusions against the original artifacts and hashes.")
     return "\n".join(lines)

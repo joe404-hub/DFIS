@@ -199,7 +199,7 @@ export default function App() {
             <ListItemButton key={c.id} selected={c.id === active} onClick={() => setActive(c.id)}>
               <ListItemText
                 primary={c.case_number}
-                secondary={`${c.title}\nRisk ${c.risk_score ?? 0} · ${c.artifact_count} events`}
+                secondary={`${c.title}\nPriority ${c.risk_score ?? 0}/100 · ${c.artifact_count} events`}
                 secondaryTypographyProps={{ component: "div", whiteSpace: "pre-line" }}
               />
             </ListItemButton>
@@ -224,10 +224,10 @@ export default function App() {
               </Box>
               <Card sx={{ minWidth: 220 }}>
                 <CardContent>
-                  <Typography variant="caption">Risk priority (not malice %)</Typography>
-                  <Typography variant="h4">{risk}</Typography>
+                  <Typography variant="caption">Investigation Priority</Typography>
+                  <Typography variant="h4">{risk}/100</Typography>
                   <Typography variant="subtitle2" color="secondary">
-                    {inv?.priority || inv?.risk?.priority || (risk >= 70 ? "HIGH PRIORITY" : "PRIORITY")}
+                    {inv?.priority || inv?.risk?.priority || (risk >= 70 ? "HIGH" : "PRIORITY")}
                   </Typography>
                   <LinearProgress variant="determinate" value={risk} sx={{ mt: 1 }} />
                   <Typography variant="caption">
