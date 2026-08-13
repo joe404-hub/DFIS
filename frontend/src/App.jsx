@@ -234,8 +234,24 @@ export default function App() {
                 Upload evidence
                 <input hidden type="file" onChange={(e) => e.target.files[0] && upload(e.target.files[0])} />
               </Button>
+              <Button
+                variant="outlined"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await api(`/api/cases/${active}/reprocess`, { method: "POST" });
+                    await loadCases();
+                    await loadCase(active);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Re-parse artifacts
+              </Button>
               <Typography variant="body2" color="text.secondary">
-                ZIP, EVTX, History SQLite, PCAP, JSON/CSV exports — hashed with SHA-256
+                Specialized parsers for Windows/Registry/Browser/Network/Memory/FS CSVs. README and expected_timeline are excluded from the investigative timeline.
               </Typography>
             </Stack>
 

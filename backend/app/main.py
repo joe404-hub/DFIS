@@ -13,7 +13,7 @@ from app.db import Base, EVIDENCE_DIR, engine, get_db
 from app.models import Artifact, Case, CustodyEvent, Evidence, Finding
 from app.services.analyzer import analyze_timeline, answer_question
 from app.services.integrity import sha256_file
-from app.services.parsers import parse_file
+from app.services.parsers import classify_skipped, parse_file
 from app.services.rag import index_case_events, knowledge_collection, retrieve
 from app.services.report import generate_report
 from app.services.seed import write_demo_package
@@ -99,11 +99,30 @@ def process_evidence_file(db: Session, case: Case, dest: Path, original_name: st
         work_files = [dest]
 
     raw = []
+    skipped = []
     for fp in work_files:
-        for rec in parse_file(fp, ev.source_type):
+        reason = classify_skipped(fp)
+        if reason:
+            skipped.append(f"{fp.name} ({reason})")
+            continue
+        parsed = parse_file(fp, ev.source_type)
+        if not parsed:
+            skipped.append(f"{fp.name} (no forensic events)")
+            continue
+        for rec in parsed:
             rec["evidence_id"] = ev.id
             rec["fingerprint"] = fingerprint(rec)
             raw.append(rec)
+    if skipped:
+        db.add(
+            CustodyEvent(
+                case_id=case.id,
+                evidence_id=ev.id,
+                action="artifact_classification",
+                actor="system",
+                detail="Excluded from investigative timeline: " + "; ".join(skipped),
+            )
+        )
     timeline = build_timeline(raw)
     for rec in timeline:
         db.add(
@@ -338,6 +357,75 @@ def graph(case_id: int, db: Session = Depends(get_db)):
             node(tn, a.target, "target")
             edges.append({"from": evn, "to": tn, "label": "involves"})
     return {"nodes": list(nodes.values()), "edges": edges}
+
+
+@app.post("/api/cases/{case_id}/reprocess")
+def reprocess(case_id: int, db: Session = Depends(get_db)):
+    """Re-run parsers on stored evidence (does not re-hash originals)."""
+    c = _case_or_404(db, case_id)
+    db.query(Artifact).filter(Artifact.case_id == case_id).delete()
+    db.query(Finding).filter(Finding.case_id == case_id).delete()
+    db.commit()
+    db.add(
+        CustodyEvent(
+            case_id=c.id,
+            action="reprocessed",
+            actor="system",
+            detail="Artifacts cleared and parsers re-run on stored working copies",
+        )
+    )
+    db.commit()
+    for ev in db.query(Evidence).filter(Evidence.case_id == case_id).all():
+        path = Path(ev.stored_path)
+        if not path.exists():
+            continue
+        # Re-parse without creating a new evidence row
+        raw = []
+        work_files = []
+        if zipfile.is_zipfile(path):
+            extract_dir = path.parent / f"extracted_{ev.id}"
+            extract_dir.mkdir(exist_ok=True)
+            with zipfile.ZipFile(path) as zf:
+                zf.extractall(extract_dir)
+            work_files = [p for p in extract_dir.rglob("*") if p.is_file()]
+        else:
+            work_files = [path]
+        skipped = []
+        for fp in work_files:
+            reason = classify_skipped(fp)
+            if reason:
+                skipped.append(f"{fp.name} ({reason})")
+                continue
+            for rec in parse_file(fp, ev.source_type):
+                rec["fingerprint"] = fingerprint(rec)
+                raw.append(rec)
+        if skipped:
+            db.add(
+                CustodyEvent(
+                    case_id=c.id,
+                    evidence_id=ev.id,
+                    action="artifact_classification",
+                    actor="system",
+                    detail="Excluded from investigative timeline: " + "; ".join(skipped),
+                )
+            )
+        for rec in build_timeline(raw):
+            db.add(
+                Artifact(
+                    case_id=c.id,
+                    evidence_id=ev.id,
+                    source_type=rec.get("source_type") or "unknown",
+                    event_type=rec.get("event_type") or "event",
+                    timestamp=rec.get("timestamp"),
+                    description=rec.get("description") or "",
+                    actor=rec.get("actor") or "",
+                    target=rec.get("target") or "",
+                    raw_data=rec.get("raw_data") or "",
+                    fingerprint=rec.get("fingerprint") or "",
+                )
+            )
+    db.commit()
+    return rebuild_analysis(db, c)
 
 
 @app.post("/api/cases/{case_id}/analyze")

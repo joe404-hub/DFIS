@@ -6,7 +6,8 @@ SOURCE = "filesystem"
 
 
 def can_parse(path: Path, name: str, suffix: str, hint: str) -> bool:
-    return suffix in {".mft", ".csv"} and ("mft" in name or "files" in name or "fs" in name)
+    # CSV filesystem exports are handled by tabular_parser
+    return suffix == ".mft" or (suffix == ".csv" and "mft" in name)
 
 
 def parse(path: Path) -> list[dict]:

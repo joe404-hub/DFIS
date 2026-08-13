@@ -15,13 +15,15 @@ CATEGORIES = [
 
 RULES = [
     (r"usb", 18, "usb", "T1052", "Exfiltration"),
+    (r"file_copy|file copy|copied to|e:/transfer|e:\\\\transfer", 16, "exfil_copy", "T1052", "Exfiltration"),
+    (r"sensitive_|customer_list|confidential", 10, "collection", "T1005", "Collection"),
     (r"\.zip|archive|staging", 14, "archive", "T1560", "Collection"),
     (r"google drive|dropbox|wetransfer|onedrive", 16, "cloud", "T1567", "Exfiltration"),
     (r"failed.?logon|4625|credential", 12, "creds", "T1110", "Credential Access"),
     (r"ransom|encrypt|\.locked", 25, "ransom", "T1486", "Impact"),
-    (r"run key|persistence|scheduled task", 12, "persist", "T1547.001", "Persistence"),
-    (r"powershell|cmd\.exe|4688", 8, "exec", "T1059", "Execution"),
-    (r"logon|login|4624", 4, "access", "T1078", "Initial Access"),
+    (r"run key|persistence|scheduled task|service_install|7045", 12, "persist", "T1543.003", "Persistence"),
+    (r"powershell|cmd\.exe|4688|process_create", 8, "exec", "T1059", "Execution"),
+    (r"logon|login|4624|admin_logon", 4, "access", "T1078", "Initial Access"),
 ]
 
 

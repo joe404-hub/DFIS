@@ -7,6 +7,8 @@ SOURCE = "structured"
 
 
 def can_parse(path: Path, name: str, suffix: str, hint: str) -> bool:
+    if name in {"case_manifest.json"} or "manifest" in name:
+        return False
     return suffix in {".json", ".ndjson"} and "chrome" not in name
 
 
