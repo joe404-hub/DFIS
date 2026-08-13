@@ -124,7 +124,7 @@ def classify_and_score(events: list[dict], groups: list[dict]) -> dict:
         techniques.append(_tech("T1005", "Collection from local system", "hypothesized", "medium", "collection"))
     if copies and usb:
         techniques.append(_tech("T1052.001", "Exfiltration via removable media", "hypothesized", "medium", "exfiltration"))
-    if network:
+    if network and (copies or usb or sensitive):
         techniques.append(_tech("T1567", "Exfil over web service", "hypothesized", "low", "exfiltration"))
 
     stages = [t["stage"] for t in techniques]
@@ -205,7 +205,8 @@ def attack_chain(events: list[dict], groups: list[dict]) -> list[dict]:
             add(g["timestamp"], "Internal drive / network session", "T1567", g["source_event_ids"], g["entity"])
     if not any(s["title"].startswith("Internal") for s in steps):
         net = [e for e in timed if e.get("source_type") in {"network", "browser"}]
-        if net:
+        suspicious = any(g["family"] in {"file_copy", "usb_connect"} for g in groups)
+        if net and suspicious:
             add(
                 net[0].get("timestamp"),
                 "Network/browser activity (web-exfil hypothesis)",
@@ -370,10 +371,45 @@ def run_investigation(case_id: int, events: list[dict]) -> dict:
 def _priority_line(inv: dict) -> str:
     score = inv.get("risk_score")
     pri = inv.get("priority") or (inv.get("risk") or {}).get("priority") or "PRIORITY"
+    cat = inv.get("category") or "Normal Activity"
+    sec = inv.get("secondary") or "Insufficient suspicious indicators"
     return (
-        "Working classification: Possible Insider Threat / Possible Data Exfiltration\n"
+        f"Working classification: Possible {cat} / {sec}\n"
         f"Investigation Priority: {score}/100 — {pri}\n"
-        "Risk is a prioritization aid, not a probability of crime."
+        "Risk is a prioritization aid, not a probability of crime. "
+        "Do not upgrade this classification unless case-specific evidence supports the upgrade."
+    )
+
+
+def _is_benign(inv: dict) -> bool:
+    cat = (inv.get("category") or "").lower()
+    score = float(inv.get("risk_score") or 0)
+    groups = inv.get("correlations") or []
+    families = {g.get("family") for g in groups}
+    if "file_copy" in families or "usb_connect" in families:
+        return False
+    return cat == "normal activity" or score < 15
+
+
+def _benign_answer(inv: dict) -> str:
+    score = inv.get("risk_score")
+    pri = inv.get("priority") or (inv.get("risk") or {}).get("priority") or "ROUTINE"
+    return "\n".join(
+        [
+            "No significant suspicious activity was identified in the available case evidence.",
+            "",
+            f"The case is currently classified as Possible {inv.get('category')} / {inv.get('secondary')}, "
+            f"with an investigation priority of {score}/100 ({pri}). "
+            "No correlated multi-source activity supports an insider-threat or data-exfiltration hypothesis.",
+            "",
+            "Ordinary network/browser activity may be present, but this alone does not establish exfiltration. "
+            "There is no case-specific evidence presented for USB transfer, sensitive-file copying, "
+            "archive creation, or other strong exfiltration indicators.",
+            "",
+            "Conclusion: No significant suspicious activity identified. "
+            "Continue to verify against the original artifacts and hashes if required.",
+            "General forensic knowledge cannot be used as evidence to upgrade this classification.",
+        ]
     )
 
 
@@ -463,6 +499,20 @@ def answer_from_investigation(question: str, events: list[dict], inv: dict) -> s
         _priority_line(inv),
         "",
     ]
+    if _is_benign(inv):
+        lines.append(_benign_answer(inv))
+        lines.append("")
+        if any(k in q for k in ("next step", "next action", "what should", "recommend", "further", "investigate next")):
+            lines.append(
+                "Recommended next step: No USB/transfer verification is indicated. "
+                "If required, confirm SHA-256 hashes of the original artifacts and close the case as routine."
+            )
+            lines.append("")
+            lines.append(format_actions(inv.get("next_actions") or recommend_actions(events, inv.get("correlations") or [])))
+        lines.append("")
+        lines.append("AI is an investigative assistant, not an evidence source.")
+        return "\n".join(lines)
+
     if any(k in q for k in ("next step", "next action", "what should", "recommend", "further", "investigate next")):
         actions = inv.get("next_actions") or recommend_actions(events, inv.get("correlations") or [])
         lines.append(
@@ -484,6 +534,9 @@ def answer_from_investigation(question: str, events: list[dict], inv: dict) -> s
         usb_ans = _usb_transfer_answer(inv, events)
         if usb_ans:
             lines.append(usb_ans)
+            lines.append("")
+        else:
+            lines.append(_benign_answer(inv))
             lines.append("")
     else:
         groups = inv.get("correlations") or []

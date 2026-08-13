@@ -15,6 +15,30 @@ def recommend_actions(events: list[dict], groups: list[dict]) -> list[dict]:
     actions = []
     usb_ids = ids("usb_connect", "usb_remove") or ev_ids("usb_connect", "usb_remove", "usb_history")
     copy_ids = ids("file_copy") or ev_ids("file_copy")
+    if not usb_ids and not copy_ids and not ids("service"):
+        actions.append(
+            {
+                "priority": 1,
+                "action": "No high-priority follow-up indicated",
+                "reason": "No USB, file-copy, or persistence correlations. Ordinary browser/network activity is not an exfiltration finding.",
+                "evidence_ids": [e.get("id") for e in events if e.get("source_type") in {"network", "browser"} and e.get("id")][:6],
+                "status": "pending_examiner_verification",
+                "layer": "verify",
+            }
+        )
+        actions.append(
+            {
+                "priority": 2,
+                "action": "Verify original artifacts and SHA-256 hashes",
+                "reason": "Preserve forensic defensibility if the case is closed as routine.",
+                "evidence_ids": [],
+                "status": "pending_examiner_verification",
+                "layer": "verify",
+            }
+        )
+        for i, a in enumerate(actions, 1):
+            a["priority"] = i
+        return actions
     if usb_ids and copy_ids:
         actions.append(
             {

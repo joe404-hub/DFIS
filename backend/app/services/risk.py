@@ -67,8 +67,7 @@ def score_case(events: list[dict], groups: list[dict]) -> dict:
     ]
     if copy_times and net_ev:
         fire("network_after")
-    elif "drive.example" in blob or ":443" in blob:
-        fire("network_after")
+    # Ordinary HTTPS/browser traffic alone is not "after transfer"
     if "admin" in blob or any(e.get("event_type") == "admin_logon" for e in events):
         fire("admin")
     if any(len(g.get("source_event_ids") or []) >= 2 for g in groups):
