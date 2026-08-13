@@ -1,0 +1,627 @@
+import shutil
+import zipfile
+from datetime import datetime
+from pathlib import Path
+
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.db import Base, EVIDENCE_DIR, engine, get_db, migrate
+from app.models import Artifact, Case, CustodyEvent, Evidence, Finding, Recommendation
+from app.services.analyzer import analyze_timeline, answer_question
+from app.services.integrity import sha256_file
+from app.services.parsers import classify_skipped, parse_file
+from app.services.rag import index_case_events, knowledge_collection, retrieve
+from app.services.report import generate_report
+from app.services.seed import write_demo_package
+from app.services.timeline import build_timeline, fingerprint
+
+app = FastAPI(title="DFIS", version="1.0.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+Base.metadata.create_all(bind=engine)
+migrate()
+
+
+class CaseIn(BaseModel):
+    case_number: str
+    title: str
+    description: str = ""
+    investigator: str = "Investigator"
+
+
+class ChatIn(BaseModel):
+    question: str
+
+
+class RecStatusIn(BaseModel):
+    status: str
+
+
+def _case_or_404(db: Session, case_id: int) -> Case:
+    c = db.get(Case, case_id)
+    if not c:
+        raise HTTPException(404, "Case not found")
+    return c
+
+
+def _art_to_dict(a: Artifact) -> dict:
+    return {
+        "id": a.id,
+        "case_id": a.case_id,
+        "evidence_id": a.evidence_id,
+        "source_type": a.source_type,
+        "event_type": a.event_type,
+        "timestamp": a.timestamp.isoformat() if a.timestamp else None,
+        "description": a.description,
+        "actor": a.actor,
+        "target": a.target,
+        "raw_data": a.raw_data,
+        "fingerprint": a.fingerprint,
+        "parser_name": a.parser_name,
+        "source_file": a.source_file,
+        "correlation_id": a.correlation_id,
+        "process": a.process,
+        "pid": a.pid,
+        "source_path": a.source_path,
+        "destination_path": a.destination_path,
+        "source_ip": a.source_ip,
+        "source_port": a.source_port,
+        "destination_ip": a.destination_ip,
+        "destination_port": a.destination_port,
+        "time_kind": getattr(a, "time_kind", None) or "event",
+        "observation_time": getattr(a, "observation_time", None) or "",
+    }
+
+
+def _artifact_row(case_id: int, evidence_id: int, rec: dict) -> Artifact:
+    return Artifact(
+        case_id=case_id,
+        evidence_id=evidence_id,
+        source_type=rec.get("source_type") or "unknown",
+        event_type=rec.get("event_type") or "event",
+        timestamp=rec.get("timestamp"),
+        description=rec.get("description") or "",
+        actor=rec.get("actor") or "",
+        target=(rec.get("target") or "")[:512],
+        raw_data=rec.get("raw_data") or "",
+        fingerprint=rec.get("fingerprint") or "",
+        parser_name=rec.get("parser_name") or "",
+        source_file=rec.get("source_file") or "",
+        correlation_id=rec.get("correlation_id") or "",
+        process=rec.get("process") or "",
+        pid=str(rec.get("pid") or ""),
+        source_path=rec.get("source_path") or "",
+        destination_path=rec.get("destination_path") or "",
+        source_ip=rec.get("source_ip") or "",
+        source_port=str(rec.get("source_port") or ""),
+        destination_ip=rec.get("destination_ip") or "",
+        destination_port=str(rec.get("destination_port") or ""),
+        time_kind=rec.get("time_kind") or ("observation" if rec.get("source_type") == "memory" else "event"),
+        observation_time=rec.get("observation_time")
+        or (str(rec.get("timestamp") or "") if rec.get("source_type") == "memory" else ""),
+    )
+
+
+def process_evidence_file(db: Session, case: Case, dest: Path, original_name: str, notes: str = "") -> Evidence:
+    digest = sha256_file(dest)
+    ev = Evidence(
+        case_id=case.id,
+        filename=original_name,
+        stored_path=str(dest),
+        sha256=digest,
+        source_type=_guess_type(original_name),
+        size_bytes=dest.stat().st_size,
+        notes=notes,
+        integrity_ok=True,
+    )
+    db.add(ev)
+    db.flush()
+    db.add(
+        CustodyEvent(
+            case_id=case.id,
+            evidence_id=ev.id,
+            action="ingested",
+            actor="system",
+            detail=f"SHA-256 {digest}",
+        )
+    )
+    work_files: list[Path] = []
+    if zipfile.is_zipfile(dest):
+        extract_dir = dest.parent / f"extracted_{ev.id}"
+        extract_dir.mkdir(exist_ok=True)
+        with zipfile.ZipFile(dest) as zf:
+            zf.extractall(extract_dir)
+        work_files = [p for p in extract_dir.rglob("*") if p.is_file()]
+    else:
+        work_files = [dest]
+
+    raw = []
+    skipped = []
+    for fp in work_files:
+        reason = classify_skipped(fp)
+        if reason:
+            skipped.append(f"{fp.name} ({reason})")
+            continue
+        parsed = parse_file(fp, ev.source_type)
+        if not parsed:
+            skipped.append(f"{fp.name} (no forensic events)")
+            continue
+        for rec in parsed:
+            rec["evidence_id"] = ev.id
+            rec["fingerprint"] = fingerprint(rec)
+            raw.append(rec)
+    if skipped:
+        db.add(
+            CustodyEvent(
+                case_id=case.id,
+                evidence_id=ev.id,
+                action="artifact_classification",
+                actor="system",
+                detail="Excluded from investigative timeline: " + "; ".join(skipped),
+            )
+        )
+    timeline = build_timeline(raw)
+    for rec in timeline:
+        db.add(_artifact_row(case.id, ev.id, rec))
+    db.commit()
+    db.refresh(ev)
+    return ev
+
+
+def _guess_type(name: str) -> str:
+    n = name.lower()
+    if n.endswith(".evtx"):
+        return "windows_event"
+    if n.endswith(".pcap") or n.endswith(".pcapng"):
+        return "network"
+    if "history" in n or n.endswith(".sqlite"):
+        return "browser"
+    if n.endswith(".zip") or n.endswith(".e01") or n.endswith(".dd"):
+        return "container"
+    return "file"
+
+
+def rebuild_analysis(db: Session, case: Case):
+    arts = db.query(Artifact).filter(Artifact.case_id == case.id).order_by(Artifact.timestamp.asc()).all()
+    events = [_art_to_dict(a) for a in arts]
+    index_case_events(case.id, events)
+    result = analyze_timeline(events, case_id=case.id)
+    db.query(Finding).filter(Finding.case_id == case.id).delete()
+    prev = {
+        r.action: r.status
+        for r in db.query(Recommendation).filter(Recommendation.case_id == case.id).all()
+    }
+    db.query(Recommendation).filter(Recommendation.case_id == case.id).delete()
+    for a in result.get("next_actions") or []:
+        db.add(
+            Recommendation(
+                case_id=case.id,
+                priority=int(a.get("priority") or 0),
+                action=a.get("action") or "",
+                reason=a.get("reason") or "",
+                evidence_ids=",".join(str(i) for i in (a.get("evidence_ids") or [])),
+                status=prev.get(a.get("action") or "", a.get("status") or "pending_examiner_verification"),
+                layer=a.get("layer") or "verify",
+            )
+        )
+    for f in result["findings"]:
+        db.add(
+            Finding(
+                case_id=case.id,
+                category=f["category"],
+                title=f["title"],
+                body=f["body"],
+                risk_score=f["risk_score"],
+                confidence=f["confidence"],
+                attack_stage=f["attack_stage"],
+                mitre_ids=f["mitre_ids"],
+                artifact_ids=f["artifact_ids"],
+            )
+        )
+    db.commit()
+    return result
+
+
+@app.on_event("startup")
+def startup():
+    knowledge_collection()
+    db = next(get_db())
+    try:
+        if db.query(Case).count() == 0:
+            demo = Case(
+                case_number="CASE-DEMO",
+                title="Suspected source-code exfiltration — WORKSTATION-14",
+                description="Synthetic teaching case: login, GitHub, USB, archive, Google Drive.",
+                investigator="A. Rao",
+                status="open",
+            )
+            db.add(demo)
+            db.commit()
+            db.refresh(demo)
+            zpath = write_demo_package()
+            dest = EVIDENCE_DIR / f"case{demo.id}_{zpath.name}"
+            shutil.copy(zpath, dest)
+            process_evidence_file(db, demo, dest, zpath.name, notes="Seeded demo package")
+            rebuild_analysis(db, demo)
+    finally:
+        db.close()
+
+
+@app.get("/api/health")
+def health():
+    return {"ok": True, "service": "DFIS"}
+
+
+@app.get("/api/cases")
+def list_cases(db: Session = Depends(get_db)):
+    cases = db.query(Case).order_by(Case.id.desc()).all()
+    out = []
+    for c in cases:
+        finding = db.query(Finding).filter(Finding.case_id == c.id).first()
+        out.append(
+            {
+                "id": c.id,
+                "case_number": c.case_number,
+                "title": c.title,
+                "description": c.description,
+                "investigator": c.investigator,
+                "status": c.status,
+                "created_at": c.created_at.isoformat(),
+                "evidence_count": len(c.evidence),
+                "artifact_count": len(c.artifacts),
+                "risk_score": finding.risk_score if finding else 0,
+                "category": finding.category if finding else None,
+            }
+        )
+    return out
+
+
+@app.post("/api/cases")
+def create_case(body: CaseIn, db: Session = Depends(get_db)):
+    if db.query(Case).filter(Case.case_number == body.case_number).first():
+        raise HTTPException(400, "Case number exists")
+    c = Case(**body.model_dump())
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    db.add(CustodyEvent(case_id=c.id, action="case_created", actor=c.investigator, detail=c.title))
+    db.commit()
+    return {"id": c.id, "case_number": c.case_number}
+
+
+@app.get("/api/cases/{case_id}")
+def get_case(case_id: int, db: Session = Depends(get_db)):
+    c = _case_or_404(db, case_id)
+    finding = db.query(Finding).filter(Finding.case_id == c.id).all()
+    evidence = [
+        {
+            "id": e.id,
+            "filename": e.filename,
+            "sha256": e.sha256,
+            "source_type": e.source_type,
+            "size_bytes": e.size_bytes,
+            "uploaded_at": e.uploaded_at.isoformat(),
+            "integrity_ok": e.integrity_ok,
+        }
+        for e in c.evidence
+    ]
+    custody = (
+        db.query(CustodyEvent)
+        .filter(CustodyEvent.case_id == c.id)
+        .order_by(CustodyEvent.created_at.asc())
+        .all()
+    )
+    return {
+        "id": c.id,
+        "case_number": c.case_number,
+        "title": c.title,
+        "description": c.description,
+        "investigator": c.investigator,
+        "status": c.status,
+        "created_at": c.created_at.isoformat(),
+        "evidence": evidence,
+        "findings": [
+            {
+                "id": f.id,
+                "category": f.category,
+                "title": f.title,
+                "body": f.body,
+                "risk_score": f.risk_score,
+                "confidence": f.confidence,
+                "attack_stage": f.attack_stage,
+                "mitre_ids": f.mitre_ids,
+                "artifact_ids": [int(x) for x in f.artifact_ids.split(",") if x],
+            }
+            for f in finding
+        ],
+        "custody": [
+            {
+                "action": x.action,
+                "actor": x.actor,
+                "detail": x.detail,
+                "created_at": x.created_at.isoformat(),
+            }
+            for x in custody
+        ],
+    }
+
+
+@app.post("/api/cases/{case_id}/evidence")
+async def upload_evidence(case_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    c = _case_or_404(db, case_id)
+    dest = EVIDENCE_DIR / f"case{c.id}_{datetime.utcnow().strftime('%H%M%S')}_{file.filename}"
+    with dest.open("wb") as out:
+        shutil.copyfileobj(file.file, out)
+    ev = process_evidence_file(db, c, dest, file.filename)
+    analysis = rebuild_analysis(db, c)
+    return {"evidence_id": ev.id, "sha256": ev.sha256, "analysis": analysis}
+
+
+@app.post("/api/cases/{case_id}/verify/{evidence_id}")
+def verify_hash(case_id: int, evidence_id: int, db: Session = Depends(get_db)):
+    _case_or_404(db, case_id)
+    ev = db.get(Evidence, evidence_id)
+    if not ev or ev.case_id != case_id:
+        raise HTTPException(404, "Evidence not found")
+    current = sha256_file(ev.stored_path)
+    ev.integrity_ok = current == ev.sha256
+    db.commit()
+    return {"stored": ev.sha256, "current": current, "ok": ev.integrity_ok}
+
+
+@app.get("/api/cases/{case_id}/timeline")
+def timeline(case_id: int, db: Session = Depends(get_db)):
+    _case_or_404(db, case_id)
+    arts = db.query(Artifact).filter(Artifact.case_id == case_id).order_by(Artifact.timestamp.asc()).all()
+    return [_art_to_dict(a) for a in arts]
+
+
+@app.get("/api/cases/{case_id}/graph")
+def graph(case_id: int, db: Session = Depends(get_db)):
+    c = _case_or_404(db, case_id)
+    arts = db.query(Artifact).filter(Artifact.case_id == case_id).all()
+    events = [_art_to_dict(a) for a in arts]
+    inv = analyze_timeline(events, case_id=c.id)
+    nodes = {}
+    edges = []
+
+    def node(nid, label, group):
+        nodes[nid] = {"id": nid, "label": str(label)[:56], "group": group}
+
+    for g in inv.get("correlations") or []:
+        cid = f"c:{g['correlation_id']}"
+        node(cid, f"{g['family']}\n{g['entity']}", "correlated")
+        for s in g.get("sources") or []:
+            eid = f"e{s.get('event_id')}"
+            node(eid, f"#{s.get('event_id')} {s.get('source_type')}", s.get("source_type") or "evidence")
+            edges.append({"from": eid, "to": cid, "label": "supports"})
+        if g.get("actor"):
+            an = "a:" + g["actor"]
+            node(an, g["actor"], "actor")
+            edges.append({"from": an, "to": cid, "label": "involved"})
+        if g.get("destination"):
+            dn = "d:" + g["destination"]
+            node(dn, g["destination"], "destination")
+            edges.append({"from": cid, "to": dn, "label": "to"})
+    if not nodes:
+        for a in arts:
+            evn = f"e{a.id}"
+            node(evn, a.event_type, a.source_type)
+            if a.actor:
+                an = "a:" + a.actor
+                node(an, a.actor, "actor")
+                edges.append({"from": an, "to": evn, "label": "performed"})
+            if a.target:
+                tn = "t:" + a.target
+                node(tn, a.target[:40], "target")
+                edges.append({"from": evn, "to": tn, "label": "involves"})
+    return {"nodes": list(nodes.values()), "edges": edges}
+
+
+@app.post("/api/cases/{case_id}/reprocess")
+def reprocess(case_id: int, db: Session = Depends(get_db)):
+    """Re-run parsers on stored evidence (does not re-hash originals)."""
+    c = _case_or_404(db, case_id)
+    db.query(Artifact).filter(Artifact.case_id == case_id).delete()
+    db.query(Finding).filter(Finding.case_id == case_id).delete()
+    db.commit()
+    db.add(
+        CustodyEvent(
+            case_id=c.id,
+            action="reprocessed",
+            actor="system",
+            detail="Artifacts cleared and parsers re-run on stored working copies",
+        )
+    )
+    db.commit()
+    for ev in db.query(Evidence).filter(Evidence.case_id == case_id).all():
+        path = Path(ev.stored_path)
+        if not path.exists():
+            continue
+        # Re-parse without creating a new evidence row
+        raw = []
+        work_files = []
+        if zipfile.is_zipfile(path):
+            extract_dir = path.parent / f"extracted_{ev.id}"
+            extract_dir.mkdir(exist_ok=True)
+            with zipfile.ZipFile(path) as zf:
+                zf.extractall(extract_dir)
+            work_files = [p for p in extract_dir.rglob("*") if p.is_file()]
+        else:
+            work_files = [path]
+        skipped = []
+        for fp in work_files:
+            reason = classify_skipped(fp)
+            if reason:
+                skipped.append(f"{fp.name} ({reason})")
+                continue
+            for rec in parse_file(fp, ev.source_type):
+                rec["fingerprint"] = fingerprint(rec)
+                raw.append(rec)
+        if skipped:
+            db.add(
+                CustodyEvent(
+                    case_id=c.id,
+                    evidence_id=ev.id,
+                    action="artifact_classification",
+                    actor="system",
+                    detail="Excluded from investigative timeline: " + "; ".join(skipped),
+                )
+            )
+        for rec in build_timeline(raw):
+            db.add(_artifact_row(c.id, ev.id, rec))
+    db.commit()
+    return rebuild_analysis(db, c)
+
+
+@app.post("/api/cases/{case_id}/analyze")
+def analyze(case_id: int, db: Session = Depends(get_db)):
+    c = _case_or_404(db, case_id)
+    return rebuild_analysis(db, c)
+
+
+@app.get("/api/cases/{case_id}/recommendations")
+def list_recommendations(case_id: int, db: Session = Depends(get_db)):
+    _case_or_404(db, case_id)
+    rows = (
+        db.query(Recommendation)
+        .filter(Recommendation.case_id == case_id)
+        .order_by(Recommendation.priority.asc())
+        .all()
+    )
+    if not rows:
+        rebuild_analysis(db, db.get(Case, case_id))
+        rows = (
+            db.query(Recommendation)
+            .filter(Recommendation.case_id == case_id)
+            .order_by(Recommendation.priority.asc())
+            .all()
+        )
+    return [
+        {
+            "id": r.id,
+            "priority": r.priority,
+            "action": r.action,
+            "reason": r.reason,
+            "evidence_ids": [int(x) for x in r.evidence_ids.split(",") if x],
+            "status": r.status,
+            "layer": r.layer,
+        }
+        for r in rows
+    ]
+
+
+@app.patch("/api/cases/{case_id}/recommendations/{rec_id}")
+def update_recommendation(case_id: int, rec_id: int, body: RecStatusIn, db: Session = Depends(get_db)):
+    _case_or_404(db, case_id)
+    rec = db.get(Recommendation, rec_id)
+    if not rec or rec.case_id != case_id:
+        raise HTTPException(404, "Recommendation not found")
+    allowed = {"pending_examiner_verification", "in_progress", "verified", "not_applicable"}
+    if body.status not in allowed:
+        raise HTTPException(400, f"status must be one of {sorted(allowed)}")
+    rec.status = body.status
+    db.add(
+        CustodyEvent(
+            case_id=case_id,
+            action="recommendation_status",
+            actor="examiner",
+            detail=f"{rec.action} → {body.status}",
+        )
+    )
+    db.commit()
+    return {"id": rec.id, "status": rec.status}
+
+
+@app.get("/api/cases/{case_id}/investigation")
+def investigation(case_id: int, db: Session = Depends(get_db)):
+    c = _case_or_404(db, case_id)
+    arts = db.query(Artifact).filter(Artifact.case_id == case_id).order_by(Artifact.timestamp.asc()).all()
+    return analyze_timeline([_art_to_dict(a) for a in arts], case_id=c.id)
+
+
+@app.post("/api/cases/{case_id}/chat")
+def chat(case_id: int, body: ChatIn, db: Session = Depends(get_db)):
+    c = _case_or_404(db, case_id)
+    arts = db.query(Artifact).filter(Artifact.case_id == case_id).all()
+    events = [_art_to_dict(a) for a in arts]
+    rag = retrieve(case_id, body.question)
+    analysis = analyze_timeline(events, case_id=case_id)
+    text = answer_question(body.question, rag, events, analysis)
+    return {
+        "answer": text,
+        "rag": analysis.get("rag") or rag,
+        "category": analysis.get("category"),
+        "investigation": {
+            "risk_score": analysis.get("risk_score"),
+            "attack_chain": analysis.get("attack_chain"),
+            "correlations": [
+                {
+                    "correlation_id": g.get("correlation_id"),
+                    "timestamp": g.get("timestamp"),
+                    "family": g.get("family"),
+                    "entity": g.get("entity"),
+                    "source_event_ids": g.get("source_event_ids"),
+                }
+                for g in (analysis.get("correlations") or [])
+            ],
+        },
+    }
+
+
+@app.get("/api/cases/{case_id}/report.json")
+def report_json(case_id: int, db: Session = Depends(get_db)):
+    """Structured evidence-linked report for the UI preview (same payload as the PDF)."""
+    c = _case_or_404(db, case_id)
+    arts = db.query(Artifact).filter(Artifact.case_id == case_id).order_by(Artifact.timestamp.asc()).all()
+    analysis = analyze_timeline([_art_to_dict(a) for a in arts], case_id=c.id)
+    from app.services.investigation import _usb_transfer_answer
+
+    return {
+        "case": {
+            "case_number": c.case_number,
+            "title": c.title,
+            "investigator": c.investigator,
+            "principle": (
+                "The LLM does not treat general forensic knowledge as evidence. "
+                "It retrieves case-specific events and uses general knowledge only to interpret them. "
+                "Every important conclusion is linked to original evidence IDs."
+            ),
+        },
+        "integrity": [
+            {"id": e.id, "filename": e.filename, "sha256": e.sha256, "ok": e.integrity_ok}
+            for e in c.evidence
+        ],
+        "classification": {
+            "label": f"Possible {analysis.get('category')} / {analysis.get('secondary')}",
+            "priority": analysis.get("priority"),
+            "risk_score": analysis.get("risk_score"),
+            "disclaimer": (analysis.get("risk") or {}).get("disclaimer"),
+        },
+        "risk": analysis.get("risk"),
+        "attack_chain": analysis.get("attack_chain"),
+        "correlations": analysis.get("correlations"),
+        "usb_qa": _usb_transfer_answer(analysis, [_art_to_dict(a) for a in arts]),
+        "next_actions": analysis.get("next_actions") or [],
+        "timeline": [_art_to_dict(a) for a in arts if a.source_type != "correlated"][:80],
+    }
+
+
+@app.get("/api/cases/{case_id}/report")
+def report(case_id: int, db: Session = Depends(get_db)):
+    c = _case_or_404(db, case_id)
+    arts = db.query(Artifact).filter(Artifact.case_id == case_id).order_by(Artifact.timestamp.asc()).all()
+    findings = db.query(Finding).filter(Finding.case_id == case_id).all()
+    analysis = analyze_timeline([_art_to_dict(a) for a in arts], case_id=c.id)
+    path = generate_report(c, c.evidence, arts, findings, analysis)
+    return FileResponse(path, filename=path.name, media_type="application/pdf")
