@@ -42,7 +42,7 @@ export default function App() {
   const [graph, setGraph] = useState({ nodes: [], edges: [] });
   const [inv, setInv] = useState(null);
   const [tab, setTab] = useState(0);
-  const [q, setQ] = useState("Was confidential data copied to USB?");
+  const [q, setQ] = useState("What is the next step to be taken?");
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
@@ -336,6 +336,14 @@ export default function App() {
                       <Typography key={i} variant="body2" sx={{ fontFamily: "IBM Plex Mono", fontSize: 12, mb: 0.5 }}>
                         {s.time} — {s.title} technique={s.mitre || "n/a"} status={s.status || "hypothesized"}{" "}
                         conf={s.confidence || "medium"} evidence_ids={(s.evidence_event_ids || []).join(",")}
+                      </Typography>
+                    ))}
+                    <Typography variant="subtitle2" sx={{ mt: 2 }}>
+                      Next investigation actions
+                    </Typography>
+                    {(inv?.next_actions || []).map((a) => (
+                      <Typography key={a.priority} variant="body2" sx={{ fontFamily: "IBM Plex Mono", fontSize: 12, mb: 0.5 }}>
+                        {a.priority}. {a.action} — {a.reason} evidence_ids={(a.evidence_ids || []).join(",")}
                       </Typography>
                     ))}
                     <Typography variant="subtitle2" sx={{ mt: 2 }}>

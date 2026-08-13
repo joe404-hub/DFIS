@@ -113,8 +113,29 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
         story.append(Paragraph(f"<b>{f.title}</b> (conf {f.confidence:.2f})", styles["Heading3"]))
         story.append(Paragraph((f.body or "").replace("\n", "<br/>")[:4000], styles["BodyText"]))
 
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("6. Recommended next investigation actions", styles["Heading2"]))
+    story.append(
+        Paragraph(
+            "These are examiner tasks, not findings of fact. T1567 remains a low-confidence hypothesis.",
+            styles["Italic"],
+        )
+    )
+    arows = [["#", "Action", "Reason", "Evidence IDs"]]
+    for a in analysis.get("next_actions") or []:
+        arows.append(
+            [
+                str(a.get("priority")),
+                (a.get("action") or "")[:40],
+                (a.get("reason") or "")[:70],
+                ",".join(str(i) for i in (a.get("evidence_ids") or [])),
+            ]
+        )
+    if len(arows) > 1:
+        story.append(_table(arows))
+
     story.append(Spacer(1, 10))
-    story.append(Paragraph("6. Timeline extract", styles["Heading2"]))
+    story.append(Paragraph("7. Timeline extract", styles["Heading2"]))
     trows = [["When", "Kind", "Source", "Event"]]
     for a in artifacts[:45]:
         trows.append(

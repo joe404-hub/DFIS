@@ -122,52 +122,7 @@ def analyze_timeline(events: list[dict], case_id: int | None = None) -> dict:
 
 
 def answer_question(question: str, rag: dict, events: list[dict], analysis: dict) -> str:
-    ev_ctx = "\n".join(rag.get("evidence") or []) or "No case embeddings yet."
-    kn_ctx = "\n".join(rag.get("knowledge") or [])
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if api_key:
-        try:
-            import httpx
-
-            prompt = (
-                "You are a digital-forensics assistant. Use only the evidence. "
-                "Cite artifact lines. Do not invent events.\n\n"
-                f"Knowledge:\n{kn_ctx}\n\nEvidence:\n{ev_ctx}\n\nQuestion: {question}"
-            )
-            r = httpx.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={
-                    "model": os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.1,
-                },
-                timeout=60,
-            )
-            r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
-        except Exception as exc:
-            fallback = f"(Remote LLM unavailable: {exc})\n\n"
-    else:
-        fallback = ""
-    # local grounded answer
-    q = question.lower()
-    lines = [fallback + f"**Grounded answer** (local ForensicLLM-style RAG, no weights required).\n"]
-    lines.append(f"Working classification: **{analysis.get('category')}** (risk {analysis.get('risk_score')}).\n")
-    lines.append("Retrieved case evidence:")
-    if rag.get("evidence"):
-        for e in rag["evidence"][:8]:
-            lines.append(f"- {e}")
-    else:
-        # keyword filter
-        for e in events:
-            blob = json.dumps(e, default=str).lower()
-            if any(tok in blob for tok in re.findall(r"[a-z0-9.]{3,}", q)):
-                lines.append(f"- [{e.get('id')}] {e.get('timestamp')} {e.get('description')}")
-    lines.append("\nGeneral forensic knowledge used:")
-    for k in (rag.get("knowledge") or [])[:4]:
-        lines.append(f"- {k}")
-    lines.append(
-        "\n_AI is an assistant, not an evidence source. Verify against original artifacts and hashes._"
-    )
-    return "\n".join(lines)
+    # Always prefer the case-investigation path so Q&A keeps uncertainty labels.
+    if analysis.get("correlations") is not None or analysis.get("next_actions") is not None or analysis.get("risk"):
+        return answer_from_investigation(question, events, analysis)
+    return answer_from_investigation(question, events, {**analysis, "correlations": [], "rag": rag})

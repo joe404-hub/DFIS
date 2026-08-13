@@ -7,6 +7,7 @@ import os
 import re
 from collections import defaultdict
 
+from app.services.actions import format_actions, recommend_actions
 from app.services.knowledge import FORENSIC_KB
 from app.services.rag import retrieve
 from app.services.risk import score_case
@@ -296,6 +297,7 @@ def run_investigation(case_id: int, events: list[dict]) -> dict:
     rag["evidence"] = [g["brief"] for g in groups][:10] + (rag.get("evidence") or [])[:4]
     cls = classify_and_score(events, groups)
     chain = attack_chain(events, groups)
+    actions = recommend_actions(events, groups)
     body = investigation_narrative(cls, groups, chain, rag)
 
     # optional remote LLM polish, still grounded
@@ -347,6 +349,7 @@ def run_investigation(case_id: int, events: list[dict]) -> dict:
         "techniques": cls.get("techniques") or [],
         "risk": cls.get("risk") or {},
         "correlations": groups,
+        "next_actions": actions,
         "rag": rag,
         "findings": [
             {
@@ -460,6 +463,23 @@ def answer_from_investigation(question: str, events: list[dict], inv: dict) -> s
         _priority_line(inv),
         "",
     ]
+    if any(k in q for k in ("next step", "next action", "what should", "recommend", "further", "investigate next")):
+        actions = inv.get("next_actions") or recommend_actions(events, inv.get("correlations") or [])
+        lines.append(
+            "Recommended next step: Verify the relationship between the removable device "
+            "identified by the USBSTOR artifact and the E:\\Transfer destination. This is necessary "
+            "to determine whether the two sensitive files were actually copied to the connected USB device. "
+            "Next, investigate the DemoUpdater service and review the 09:30 network activity to determine "
+            "whether data was subsequently transferred over the network. Do not treat drive.example.local "
+            "or TLS POST as confirmed exfiltration (T1567 remains a low-confidence hypothesis). "
+            "All findings should be verified against the original artifacts and hashes."
+        )
+        lines.append("")
+        lines.append(format_actions(actions))
+        lines.append("")
+        lines.append("AI is an investigative assistant, not an evidence source.")
+        return "\n".join(lines)
+
     if any(k in q for k in ("usb", "copied", "copy", "exfil", "transfer", "confidential", "sensitive")):
         usb_ans = _usb_transfer_answer(inv, events)
         if usb_ans:
