@@ -42,6 +42,8 @@ def migrate():
         "source_port": "VARCHAR(16) DEFAULT ''",
         "destination_ip": "VARCHAR(64) DEFAULT ''",
         "destination_port": "VARCHAR(16) DEFAULT ''",
+        "time_kind": "VARCHAR(32) DEFAULT 'event'",
+        "observation_time": "VARCHAR(64) DEFAULT ''",
     }
     with engine.begin() as conn:
         existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(artifacts)")}

@@ -74,6 +74,8 @@ def _art_to_dict(a: Artifact) -> dict:
         "source_port": a.source_port,
         "destination_ip": a.destination_ip,
         "destination_port": a.destination_port,
+        "time_kind": getattr(a, "time_kind", None) or "event",
+        "observation_time": getattr(a, "observation_time", None) or "",
     }
 
 
@@ -100,6 +102,9 @@ def _artifact_row(case_id: int, evidence_id: int, rec: dict) -> Artifact:
         source_port=str(rec.get("source_port") or ""),
         destination_ip=rec.get("destination_ip") or "",
         destination_port=str(rec.get("destination_port") or ""),
+        time_kind=rec.get("time_kind") or ("observation" if rec.get("source_type") == "memory" else "event"),
+        observation_time=rec.get("observation_time")
+        or (str(rec.get("timestamp") or "") if rec.get("source_type") == "memory" else ""),
     )
 
 
@@ -199,7 +204,7 @@ def rebuild_analysis(db: Session, case: Case):
     arts = db.query(Artifact).filter(Artifact.case_id == case.id).order_by(Artifact.timestamp.asc()).all()
     events = [_art_to_dict(a) for a in arts]
     index_case_events(case.id, events)
-    result = analyze_timeline(events)
+    result = analyze_timeline(events, case_id=case.id)
     db.query(Finding).filter(Finding.case_id == case.id).delete()
     for f in result["findings"]:
         db.add(
@@ -459,15 +464,40 @@ def analyze(case_id: int, db: Session = Depends(get_db)):
     return rebuild_analysis(db, c)
 
 
+@app.get("/api/cases/{case_id}/investigation")
+def investigation(case_id: int, db: Session = Depends(get_db)):
+    c = _case_or_404(db, case_id)
+    arts = db.query(Artifact).filter(Artifact.case_id == case_id).order_by(Artifact.timestamp.asc()).all()
+    return analyze_timeline([_art_to_dict(a) for a in arts], case_id=c.id)
+
+
 @app.post("/api/cases/{case_id}/chat")
 def chat(case_id: int, body: ChatIn, db: Session = Depends(get_db)):
     c = _case_or_404(db, case_id)
     arts = db.query(Artifact).filter(Artifact.case_id == case_id).all()
     events = [_art_to_dict(a) for a in arts]
     rag = retrieve(case_id, body.question)
-    analysis = analyze_timeline(events)
+    analysis = analyze_timeline(events, case_id=case_id)
     text = answer_question(body.question, rag, events, analysis)
-    return {"answer": text, "rag": rag, "category": analysis.get("category")}
+    return {
+        "answer": text,
+        "rag": analysis.get("rag") or rag,
+        "category": analysis.get("category"),
+        "investigation": {
+            "risk_score": analysis.get("risk_score"),
+            "attack_chain": analysis.get("attack_chain"),
+            "correlations": [
+                {
+                    "correlation_id": g.get("correlation_id"),
+                    "timestamp": g.get("timestamp"),
+                    "family": g.get("family"),
+                    "entity": g.get("entity"),
+                    "source_event_ids": g.get("source_event_ids"),
+                }
+                for g in (analysis.get("correlations") or [])
+            ],
+        },
+    }
 
 
 @app.get("/api/cases/{case_id}/report")

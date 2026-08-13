@@ -40,6 +40,7 @@ export default function App() {
   const [detail, setDetail] = useState(null);
   const [timeline, setTimeline] = useState([]);
   const [graph, setGraph] = useState({ nodes: [], edges: [] });
+  const [inv, setInv] = useState(null);
   const [tab, setTab] = useState(0);
   const [q, setQ] = useState("Was confidential data copied to USB?");
   const [answer, setAnswer] = useState("");
@@ -65,14 +66,16 @@ export default function App() {
   const loadCase = async (id) => {
     setBusy(true);
     try {
-      const [d, t, g] = await Promise.all([
+      const [d, t, g, invr] = await Promise.all([
         api(`/api/cases/${id}`).then((x) => x.json()),
         api(`/api/cases/${id}/timeline`).then((x) => x.json()),
         api(`/api/cases/${id}/graph`).then((x) => x.json()),
+        api(`/api/cases/${id}/investigation`).then((x) => x.json()).catch(() => null),
       ]);
       setDetail(d);
       setTimeline(t);
       setGraph(g);
+      setInv(invr);
       setAnswer("");
     } finally {
       setBusy(false);
@@ -261,6 +264,7 @@ export default function App() {
                   <Tab icon={<TimelineIcon />} iconPosition="start" label="Timeline" />
                   <Tab label="Relationship graph" />
                   <Tab label="Evidence & custody" />
+                  <Tab label="Investigation" />
                 </Tabs>
                 <Divider />
                 {tab === 0 && <Box ref={tlRef} sx={{ height: 420, bgcolor: "#08141c" }} />}

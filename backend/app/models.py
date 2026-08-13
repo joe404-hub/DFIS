@@ -58,6 +58,8 @@ class Artifact(Base):
     source_port: Mapped[str] = mapped_column(String(16), default="")
     destination_ip: Mapped[str] = mapped_column(String(64), default="")
     destination_port: Mapped[str] = mapped_column(String(16), default="")
+    time_kind: Mapped[str] = mapped_column(String(32), default="event")
+    observation_time: Mapped[str] = mapped_column(String(64), default="")
     case = relationship("Case", back_populates="artifacts")
     evidence = relationship("Evidence", back_populates="artifacts")
 

@@ -48,7 +48,8 @@ def parse(path: Path) -> list[dict]:
                     "event_type": et,
                     "timestamp": captured,
                     "description": (
-                        f"Synthetic memory process list | Process: {proc} | PID: {m.group('pid')} | User: {m.group('user')}"
+                        f"Synthetic memory process list | Process: {proc} | PID: {m.group('pid')} | "
+                        f"User: {m.group('user')} | observation_time={captured} (snapshot, not start time)"
                     ),
                     "actor": m.group("user"),
                     "target": proc,
@@ -57,6 +58,8 @@ def parse(path: Path) -> list[dict]:
                     "raw_data": json.dumps({"line": line, "synthetic": True}),
                     "parser_name": "memory_text",
                     "source_file": path.name,
+                    "time_kind": "observation",
+                    "observation_time": captured.isoformat() if captured else "",
                 }
             )
             continue
@@ -69,7 +72,7 @@ def parse(path: Path) -> list[dict]:
                     "timestamp": captured,
                     "description": (
                         f"Synthetic memory network | {n.group('src')}:{n.group('sport')} → "
-                        f"{n.group('dst')}:{n.group('dport')}"
+                        f"{n.group('dst')}:{n.group('dport')} | observation_time={captured}"
                     ),
                     "actor": n.group("src"),
                     "target": f"{n.group('dst')}:{n.group('dport')}",
@@ -77,9 +80,11 @@ def parse(path: Path) -> list[dict]:
                     "source_port": n.group("sport"),
                     "destination_ip": n.group("dst"),
                     "destination_port": n.group("dport"),
-                    "raw_data": json.dumps({"line": line, "synthetic": True}),
+                    "raw_data": json.dumps({"line": line, "synthetic": True, "time_kind": "observation"}),
                     "parser_name": "memory_text",
                     "source_file": path.name,
+                    "time_kind": "observation",
+                    "observation_time": captured.isoformat() if captured else "",
                 }
             )
     return events

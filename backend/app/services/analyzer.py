@@ -3,6 +3,8 @@ import os
 import re
 from collections import Counter
 
+from app.services.investigation import answer_from_investigation, run_investigation
+
 CATEGORIES = [
     "Data Theft",
     "Insider Threat",
@@ -27,7 +29,9 @@ RULES = [
 ]
 
 
-def analyze_timeline(events: list[dict]) -> dict:
+def analyze_timeline(events: list[dict], case_id: int | None = None) -> dict:
+    if case_id is not None:
+        return run_investigation(case_id, events)
     blob = "\n".join(f"{e.get('description','')} {e.get('event_type','')}" for e in events).lower()
     score = 0
     hits = []
