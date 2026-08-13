@@ -9,6 +9,7 @@ from collections import defaultdict
 
 from app.services.knowledge import FORENSIC_KB
 from app.services.rag import retrieve
+from app.services.risk import score_case
 
 
 def group_correlations(events: list[dict]) -> list[dict]:
@@ -92,23 +93,8 @@ def classify_and_score(events: list[dict], groups: list[dict]) -> dict:
     service = any(g["family"] == "service" for g in groups)
     network = any(g["family"] == "network" for g in groups) or "10.0.0.50" in blob or "drive.example" in blob
     logon = "logon" in blob or "4624" in blob
-
-    score = 0
-    if logon:
-        score += 6
-    if powershell:
-        score += 10
-    if service:
-        score += 12
-    if usb:
-        score += 18
-    if sensitive:
-        score += 12
-    if copies:
-        score += 18
-    if network:
-        score += 10
-    score = min(100, score)
+    risk = score_case(events, groups)
+    score = risk["risk_score"]
 
     if copies and (usb or network) and (sensitive or logon):
         category = "Insider Threat"
@@ -126,47 +112,49 @@ def classify_and_score(events: list[dict], groups: list[dict]) -> dict:
         category = "Unauthorized Access"
         secondary = "Suspicious activity without a complete exfil chain"
 
-    mitre = []
-    stages = []
+    techniques = []
     if logon:
-        mitre.append("T1078")
-        stages.append("Initial Access")
+        techniques.append(_tech("T1078", "Valid account / user authentication", "hypothesized", "medium", "observation"))
     if powershell:
-        mitre.append("T1059.001")
-        stages.append("Execution")
+        techniques.append(_tech("T1059.001", "PowerShell execution", "hypothesized", "medium", "execution"))
     if service:
-        mitre.append("T1543.003")
-        stages.append("Persistence")
+        techniques.append(_tech("T1543.003", "Windows service persistence", "hypothesized", "medium", "persistence"))
     if sensitive:
-        mitre.append("T1005")
-        stages.append("Collection")
+        techniques.append(_tech("T1005", "Collection from local system", "hypothesized", "medium", "collection"))
     if copies and usb:
-        mitre.append("T1052.001")
-        stages.append("Exfiltration")
+        techniques.append(_tech("T1052.001", "Exfiltration via removable media", "hypothesized", "medium", "exfiltration"))
     if network:
-        mitre.append("T1567")
-        stages.append("Command and Control / Exfiltration")
+        techniques.append(_tech("T1567", "Exfil over web service", "hypothesized", "low", "exfiltration"))
 
+    stages = [t["stage"] for t in techniques]
     return {
         "category": category,
         "secondary": secondary,
         "risk_score": score,
+        "risk": risk,
         "confidence": 0.62 if score < 40 else 0.78 if score < 70 else 0.86,
-        "mitre_ids": ", ".join(dict.fromkeys(mitre)),
+        "mitre_ids": ", ".join(t["id"] for t in techniques),
+        "techniques": techniques,
         "attack_stage": " → ".join(dict.fromkeys(stages)),
     }
+
+
+def _tech(tid, name, status, confidence, stage):
+    return {"id": tid, "name": name, "status": status, "confidence": confidence, "stage": stage}
 
 
 def attack_chain(events: list[dict], groups: list[dict]) -> list[dict]:
     """Ordered hypothesis steps, each linked to raw event IDs."""
     steps = []
 
-    def add(time, title, mitre, ids, note):
+    def add(time, title, mitre, ids, note, status="hypothesized", confidence="medium"):
         steps.append(
             {
                 "time": time,
                 "title": title,
                 "mitre": mitre,
+                "status": status,
+                "confidence": confidence,
                 "evidence_event_ids": [i for i in ids if i is not None],
                 "note": note,
             }
@@ -188,7 +176,15 @@ def attack_chain(events: list[dict], groups: list[dict]) -> list[dict]:
     timed = [e for e in events if e.get("timestamp") and e.get("source_type") != "correlated"]
     logons = [e for e in timed if e.get("event_type") in {"logon", "admin_logon"}]
     if logons:
-        add(logons[0].get("timestamp"), "User session started", "T1078", [logons[0].get("id")], logons[0].get("description"))
+        add(
+            logons[0].get("timestamp"),
+            "User authentication / valid-account activity",
+            "T1078",
+            [logons[0].get("id")],
+            "Observed logon — not established as attacker initial access",
+            status="observed",
+            confidence="high",
+        )
     ps = [e for e in timed if "powershell" in (e.get("description") or "").lower()]
     if ps:
         add(ps[0].get("timestamp"), "PowerShell execution", "T1059.001", [ps[0].get("id")], "Process creation observed")
@@ -209,7 +205,15 @@ def attack_chain(events: list[dict], groups: list[dict]) -> list[dict]:
     if not any(s["title"].startswith("Internal") for s in steps):
         net = [e for e in timed if e.get("source_type") in {"network", "browser"}]
         if net:
-            add(net[0].get("timestamp"), "Network/browser activity", "T1567", [e.get("id") for e in net[:4]], net[0].get("description"))
+            add(
+                net[0].get("timestamp"),
+                "Network/browser activity (web-exfil hypothesis)",
+                "T1567",
+                [e.get("id") for e in net[:4]],
+                "Internal drive/TLS observed; T1567 is hypothesized, not proven",
+                status="hypothesized",
+                confidence="low",
+            )
     mem = [e for e in events if e.get("source_type") == "memory"]
     if mem:
         add(
@@ -254,14 +258,32 @@ def investigation_narrative(cls: dict, groups: list[dict], chain: list[dict], ra
             f"evidence_ids={g['source_event_ids']}"
         )
     lines.append("")
-    lines.append("Attack-chain hypothesis (review required):")
+    risk = cls.get("risk") or {}
+    lines.append(
+        f"Risk score: {cls.get('risk_score')} / 100 "
+        f"({risk.get('method', 'hybrid rules')}). {risk.get('disclaimer', '')}"
+    )
+    for ind in risk.get("indicators") or []:
+        lines.append(f"  +{ind['points']} {ind['label']}")
+    lines.append("")
+    lines.append("Attack-chain hypothesis (review required; ATT&CK = hypothesized unless marked observed):")
     for s in chain:
-        lines.append(f"- {s['time']} {s['title']} [{s['mitre']}] evidence_ids={s['evidence_event_ids']}")
+        lines.append(
+            f"- {s['time']} {s['title']} technique={s['mitre'] or 'n/a'} "
+            f"status={s.get('status','hypothesized')} confidence={s.get('confidence','medium')} "
+            f"evidence_ids={s['evidence_event_ids']}"
+        )
+    lines.append("")
+    lines.append("CASE-SPECIFIC EVIDENCE (authoritative for this case):")
+    for g in groups:
+        dest = f" dest={g['destination']}" if g.get("destination") else ""
+        lines.append(f"- {g['timestamp']} {g['family']} {g['entity']}{dest} evidence_ids={g['source_event_ids']}")
     if rag.get("knowledge"):
         lines.append("")
-        lines.append("Forensic knowledge retrieved:")
+        lines.append("GENERAL FORENSIC KNOWLEDGE (interpretive only — do not treat as CASE001 events):")
         for k in rag["knowledge"][:4]:
             lines.append(f"- {k}")
+        lines.append("Do not infer events that are absent from CASE-SPECIFIC EVIDENCE (e.g. archive creation).")
     lines.append("")
     lines.append("AI is an assistant, not an evidence source. Correlation IDs are links, not artifacts.")
     return "\n".join(lines)
@@ -283,12 +305,17 @@ def run_investigation(case_id: int, events: list[dict]) -> dict:
             import httpx
 
             prompt = (
-                "You are a digital-forensics assistant. Use only the correlated briefs. "
-                "Do not claim proof of intent. Cite evidence event IDs. "
-                "Correlation IDs are links, not evidence.\n\n"
-                f"Knowledge:\n" + "\n".join(rag.get("knowledge") or []) + "\n\n"
-                f"Briefs:\n{briefs}\n\n"
-                "Write a short preliminary classification and attack-chain explanation."
+                "You are a digital-forensics assistant.\n"
+                "GENERAL FORENSIC KNOWLEDGE is interpretive only.\n"
+                "CASE-SPECIFIC EVIDENCE is the only source of events.\n"
+                "Do NOT infer events absent from CASE EVIDENCE (no archive unless listed).\n"
+                "Do not claim proof of intent. Cite evidence event IDs.\n"
+                "ATT&CK mappings are hypothesized.\n\n"
+                "GENERAL FORENSIC KNOWLEDGE:\n"
+                + "\n".join(rag.get("knowledge") or [])
+                + "\n\nCASE-SPECIFIC EVIDENCE:\n"
+                + briefs
+                + "\n\nWrite a short preliminary classification and attack-chain explanation."
             )
             r = httpx.post(
                 "https://api.openai.com/v1/chat/completions",
@@ -316,6 +343,8 @@ def run_investigation(case_id: int, events: list[dict]) -> dict:
         "mitre_ids": cls["mitre_ids"],
         "attack_stage": cls["attack_stage"],
         "attack_chain": chain,
+        "techniques": cls.get("techniques") or [],
+        "risk": cls.get("risk") or {},
         "correlations": groups,
         "rag": rag,
         "findings": [

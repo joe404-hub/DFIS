@@ -162,7 +162,7 @@ export default function App() {
     await loadCases();
   };
 
-  const risk = finding?.risk_score || 0;
+  const risk = inv?.risk_score || finding?.risk_score || 0;
 
   return (
     <Box sx={{ display: "flex", minHeight: "100vh" }}>
@@ -299,8 +299,46 @@ export default function App() {
                           color: e.source_type === "correlated" ? "#f4b942" : "inherit",
                         }}
                       >
-                        [{e.id}] {e.timestamp || "—"} · {e.source_type}/{e.event_type}
-                        {e.correlation_id ? ` · corr:${e.correlation_id}` : ""} · {e.description}
+                        [{e.id}] {e.time_kind === "observation" ? "obs " : ""}
+                        {e.timestamp || "—"} · {e.source_type}/{e.event_type}
+                        {e.correlation_id ? ` · link=${e.correlation_id}` : ""} · {e.description}
+                      </Typography>
+                    ))}
+                  </Box>
+                )}
+                {tab === 3 && (
+                  <Box sx={{ p: 2, maxHeight: 420, overflow: "auto" }}>
+                    <Typography variant="subtitle1">
+                      Possible {inv?.category || finding?.category} / {inv?.secondary || "review required"}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                      Correlation IDs are links, not evidence. ATT&amp;CK is hypothesized unless marked observed.
+                    </Typography>
+                    <Typography variant="subtitle2">Risk indicators (documented prototype weights)</Typography>
+                    {(inv?.risk?.indicators || []).map((i) => (
+                      <Typography key={i.id} variant="body2" sx={{ fontFamily: "IBM Plex Mono", fontSize: 12 }}>
+                        +{i.points} {i.label}
+                      </Typography>
+                    ))}
+                    <Typography variant="caption" display="block" color="text.secondary">
+                      {inv?.risk?.disclaimer}
+                    </Typography>
+                    <Typography variant="subtitle2" sx={{ mt: 1 }}>
+                      Attack-chain hypothesis
+                    </Typography>
+                    {(inv?.attack_chain || []).map((s, i) => (
+                      <Typography key={i} variant="body2" sx={{ fontFamily: "IBM Plex Mono", fontSize: 12, mb: 0.5 }}>
+                        {s.time} — {s.title} technique={s.mitre || "n/a"} status={s.status || "hypothesized"}{" "}
+                        conf={s.confidence || "medium"} evidence_ids={(s.evidence_event_ids || []).join(",")}
+                      </Typography>
+                    ))}
+                    <Typography variant="subtitle2" sx={{ mt: 2 }}>
+                      Correlated activities
+                    </Typography>
+                    {(inv?.correlations || []).map((g) => (
+                      <Typography key={g.correlation_id} variant="body2" sx={{ fontFamily: "IBM Plex Mono", fontSize: 12 }}>
+                        {g.timestamp} {g.family} {g.entity} link={g.correlation_id} evidence_ids=
+                        {(g.source_event_ids || []).join(",")}
                       </Typography>
                     ))}
                   </Box>

@@ -168,20 +168,7 @@ def process_evidence_file(db: Session, case: Case, dest: Path, original_name: st
         )
     timeline = build_timeline(raw)
     for rec in timeline:
-        db.add(
-            Artifact(
-                case_id=case.id,
-                evidence_id=ev.id,
-                source_type=rec.get("source_type") or "unknown",
-                event_type=rec.get("event_type") or "event",
-                timestamp=rec.get("timestamp"),
-                description=rec.get("description") or "",
-                actor=rec.get("actor") or "",
-                target=rec.get("target") or "",
-                raw_data=rec.get("raw_data") or "",
-                fingerprint=rec.get("fingerprint") or "",
-            )
-        )
+        db.add(_artifact_row(case.id, ev.id, rec))
     db.commit()
     db.refresh(ev)
     return ev
@@ -380,25 +367,43 @@ def timeline(case_id: int, db: Session = Depends(get_db)):
 
 @app.get("/api/cases/{case_id}/graph")
 def graph(case_id: int, db: Session = Depends(get_db)):
-    _case_or_404(db, case_id)
+    c = _case_or_404(db, case_id)
     arts = db.query(Artifact).filter(Artifact.case_id == case_id).all()
+    events = [_art_to_dict(a) for a in arts]
+    inv = analyze_timeline(events, case_id=c.id)
     nodes = {}
     edges = []
 
     def node(nid, label, group):
-        nodes[nid] = {"id": nid, "label": label[:48], "group": group}
+        nodes[nid] = {"id": nid, "label": str(label)[:56], "group": group}
 
-    for a in arts:
-        evn = f"e{a.id}"
-        node(evn, a.event_type, a.source_type)
-        if a.actor:
-            an = "a:" + a.actor
-            node(an, a.actor, "actor")
-            edges.append({"from": an, "to": evn, "label": "performed"})
-        if a.target:
-            tn = "t:" + a.target
-            node(tn, a.target, "target")
-            edges.append({"from": evn, "to": tn, "label": "involves"})
+    for g in inv.get("correlations") or []:
+        cid = f"c:{g['correlation_id']}"
+        node(cid, f"{g['family']}\n{g['entity']}", "correlated")
+        for s in g.get("sources") or []:
+            eid = f"e{s.get('event_id')}"
+            node(eid, f"#{s.get('event_id')} {s.get('source_type')}", s.get("source_type") or "evidence")
+            edges.append({"from": eid, "to": cid, "label": "supports"})
+        if g.get("actor"):
+            an = "a:" + g["actor"]
+            node(an, g["actor"], "actor")
+            edges.append({"from": an, "to": cid, "label": "involved"})
+        if g.get("destination"):
+            dn = "d:" + g["destination"]
+            node(dn, g["destination"], "destination")
+            edges.append({"from": cid, "to": dn, "label": "to"})
+    if not nodes:
+        for a in arts:
+            evn = f"e{a.id}"
+            node(evn, a.event_type, a.source_type)
+            if a.actor:
+                an = "a:" + a.actor
+                node(an, a.actor, "actor")
+                edges.append({"from": an, "to": evn, "label": "performed"})
+            if a.target:
+                tn = "t:" + a.target
+                node(tn, a.target[:40], "target")
+                edges.append({"from": evn, "to": tn, "label": "involves"})
     return {"nodes": list(nodes.values()), "edges": edges}
 
 
@@ -505,9 +510,6 @@ def report(case_id: int, db: Session = Depends(get_db)):
     c = _case_or_404(db, case_id)
     arts = db.query(Artifact).filter(Artifact.case_id == case_id).order_by(Artifact.timestamp.asc()).all()
     findings = db.query(Finding).filter(Finding.case_id == case_id).all()
-    analysis = {
-        "category": findings[0].category if findings else "Unknown",
-        "risk_score": findings[0].risk_score if findings else 0,
-    }
+    analysis = analyze_timeline([_art_to_dict(a) for a in arts], case_id=c.id)
     path = generate_report(c, c.evidence, arts, findings, analysis)
     return FileResponse(path, filename=path.name, media_type="application/pdf")
