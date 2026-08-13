@@ -22,6 +22,16 @@ INDICATORS = [
 ]
 
 
+def priority_label(score: int) -> str:
+    if score >= 70:
+        return "HIGH PRIORITY"
+    if score >= 40:
+        return "MEDIUM PRIORITY"
+    if score >= 15:
+        return "LOW PRIORITY"
+    return "ROUTINE"
+
+
 def score_case(events: list[dict], groups: list[dict]) -> dict:
     blob = " ".join(f"{e.get('description','')} {e.get('event_type','')}" for e in events).lower()
     families = {g.get("family") for g in groups}
@@ -68,12 +78,13 @@ def score_case(events: list[dict], groups: list[dict]) -> dict:
     score = min(100, raw)
     return {
         "risk_score": score,
+        "priority": priority_label(score),
         "raw_sum": raw,
         "cap": 100,
         "method": "rule_indicators + multi_source_correlation (documented prototype weights)",
         "disclaimer": (
-            "Risk is a prioritization aid. Weights are a design choice for this prototype "
-            "and do not establish that an offense occurred."
+            "Risk is a prioritization aid, not a probability of crime. "
+            "Weights are a design choice for this prototype and do not establish that an offense occurred."
         ),
         "indicators": [
             {"id": i["id"], "label": i["label"], "points": i["points"], "fired": True} for i in fired

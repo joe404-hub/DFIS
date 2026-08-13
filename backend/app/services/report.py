@@ -34,7 +34,9 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
     story.append(
         Paragraph(
             f"Hypothesis: <b>Possible {analysis.get('category')}</b> / {analysis.get('secondary') or ''} "
-            f"&nbsp; Risk: {analysis.get('risk_score')} / 100",
+            f"&nbsp; Risk Priority: {analysis.get('risk_score')}/100 — "
+            f"{(analysis.get('risk') or {}).get('priority') or analysis.get('priority') or 'PRIORITY'} "
+            f"(not a probability of crime)",
             styles["BodyText"],
         )
     )
@@ -88,6 +90,21 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
         )
     if len(grows) > 1:
         story.append(_table(grows))
+
+    from app.services.investigation import _usb_transfer_answer
+
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("5b. Grounded examiner Q&amp;A (USB / transfer)", styles["Heading2"]))
+    qa = _usb_transfer_answer(analysis, [])
+    if qa:
+        story.append(Paragraph(qa.replace("\n", "<br/>"), styles["BodyText"]))
+    else:
+        story.append(
+            Paragraph(
+                "No file-copy correlation is available to answer whether confidential data was copied to USB.",
+                styles["BodyText"],
+            )
+        )
 
     for f in findings:
         story.append(Paragraph(f"<b>{f.title}</b> (conf {f.confidence:.2f})", styles["Heading3"]))

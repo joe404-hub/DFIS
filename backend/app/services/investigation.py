@@ -339,6 +339,7 @@ def run_investigation(case_id: int, events: list[dict]) -> dict:
         "category": cls["category"],
         "secondary": cls["secondary"],
         "risk_score": cls["risk_score"],
+        "priority": (cls.get("risk") or {}).get("priority") or "PRIORITY",
         "confidence": cls["confidence"],
         "mitre_ids": cls["mitre_ids"],
         "attack_stage": cls["attack_stage"],
@@ -363,14 +364,65 @@ def run_investigation(case_id: int, events: list[dict]) -> dict:
     }
 
 
+def _priority_line(inv: dict) -> str:
+    score = inv.get("risk_score")
+    pri = inv.get("priority") or (inv.get("risk") or {}).get("priority") or "PRIORITY"
+    return (
+        f"Working classification: Possible {inv.get('category')} / "
+        f"{inv.get('secondary') or 'review required'} "
+        f"(Risk Priority: {score}/100 — {pri}). "
+        "This is investigation priority, not a probability of crime."
+    )
+
+
+def _usb_transfer_answer(inv: dict, events: list[dict]) -> str | None:
+    copies = [g for g in (inv.get("correlations") or []) if g.get("family") == "file_copy"]
+    usb = [g for g in (inv.get("correlations") or []) if g.get("family") in {"usb_connect", "usb_remove"}]
+    if not copies:
+        copies = [
+            {
+                "entity": e.get("target"),
+                "destination": e.get("destination_path") or e.get("target"),
+                "source_event_ids": [e.get("id")],
+            }
+            for e in events
+            if e.get("event_type") == "file_copy"
+        ]
+    if not copies:
+        return None
+    dests = sorted({(c.get("destination") or "E:/Transfer") for c in copies})
+    copy_ids = []
+    for c in copies:
+        copy_ids.extend(c.get("source_event_ids") or [])
+    usb_ids = []
+    for u in usb:
+        usb_ids.extend(u.get("source_event_ids") or [])
+    files = ", ".join(sorted({str(c.get("entity") or "?") for c in copies}))
+    dest = dests[0] if dests else "a transfer path"
+    usb_clause = (
+        f" A removable device was connected shortly beforehand (evidence_ids={usb_ids})." if usb_ids else ""
+    )
+    return (
+        f"Grounded answer: Evidence shows that {files} were copied to {dest} "
+        f"(evidence_ids={copy_ids}).{usb_clause} "
+        f"The available evidence therefore supports a possible USB/removable-media transfer, "
+        f"but does not conclusively prove that {dest} corresponds to that USB device. "
+        "Drive/device mapping should be verified before stating the files were copied specifically to USB."
+    )
+
+
 def answer_from_investigation(question: str, events: list[dict], inv: dict) -> str:
     q = question.lower()
     lines = [
-        f"**Investigation answer** (grounded in correlated timeline, not the ZIP).",
-        f"Preliminary classification: possible **{inv.get('category')}** / {inv.get('secondary')}. "
-        f"Risk {inv.get('risk_score')}. Intent is not established.",
+        "**Investigation answer** (grounded in the correlated timeline, not the ZIP).",
+        _priority_line(inv),
         "",
     ]
+    if any(k in q for k in ("usb", "copied", "copy", "exfil", "transfer", "confidential", "sensitive")):
+        usb_ans = _usb_transfer_answer(inv, events)
+        if usb_ans:
+            lines.append(usb_ans)
+            lines.append("")
     groups = inv.get("correlations") or []
     scored = []
     toks = {t for t in re.findall(r"[a-z0-9._-]{3,}", q)}
@@ -387,9 +439,10 @@ def answer_from_investigation(question: str, events: list[dict], inv: dict) -> s
         )
         for s in g["sources"][:4]:
             lines.append(f"    event_id={s['event_id']} {s['source_type']} {s['source_file']}: {s['description']}")
-    if inv.get("rag", {}).get("knowledge"):
-        lines.append("\nGeneral forensic knowledge:")
-        for k in inv["rag"]["knowledge"][:3]:
-            lines.append(f"- {k}")
-    lines.append("\n_Correlation IDs are links. Original hashed artifacts remain authoritative._")
+    lines.append("")
+    lines.append("GENERAL FORENSIC KNOWLEDGE (interpretive only — not CASE events):")
+    for k in (inv.get("rag") or {}).get("knowledge") or []:
+        lines.append(f"- {k}")
+        break
+    lines.append("\n_AI is an assistant, not an evidence source. Correlation IDs are links._")
     return "\n".join(lines)
