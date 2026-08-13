@@ -368,10 +368,9 @@ def _priority_line(inv: dict) -> str:
     score = inv.get("risk_score")
     pri = inv.get("priority") or (inv.get("risk") or {}).get("priority") or "PRIORITY"
     return (
-        f"Working classification: Possible {inv.get('category')} / "
-        f"{inv.get('secondary') or 'review required'} "
-        f"(Investigation Priority: {score}/100 — {pri}). "
-        "This is investigation priority, not a probability of crime."
+        "Working classification: Possible Insider Threat / Possible Data Exfiltration\n"
+        f"Investigation Priority: {score}/100 — {pri}\n"
+        "Risk is a prioritization aid, not a probability of crime."
     )
 
 
@@ -439,9 +438,11 @@ def _usb_transfer_answer(inv: dict, events: list[dict]) -> str | None:
             "  No explicit USB file-write event shown",
             "  No cryptographic/hash confirmation of copied files shown",
             "",
-            f"The evidence indicates that confidential files were copied to {dest} after a removable USB device was connected. "
-            f"However, the available evidence does not conclusively establish that {dest} was the connected USB device. "
-            "Therefore, a USB transfer is possible/strongly suspected but not conclusively proven from the currently retrieved evidence.",
+            f"The case shows that a removable device was connected and that confidential files "
+            f"were subsequently copied to {dest}. This sequence is consistent with a possible "
+            f"transfer to removable media. However, the available evidence does not directly "
+            f"establish that {dest} corresponds to the USB device that was connected. "
+            "Further verification of the drive/device mapping is required.",
             "",
             "Conclusion: Possible USB/removable-media transfer; further verification of the drive/device mapping is required.",
             "Confidence: Medium",

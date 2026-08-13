@@ -505,6 +505,43 @@ def chat(case_id: int, body: ChatIn, db: Session = Depends(get_db)):
     }
 
 
+@app.get("/api/cases/{case_id}/report.json")
+def report_json(case_id: int, db: Session = Depends(get_db)):
+    """Structured evidence-linked report for the UI preview (same payload as the PDF)."""
+    c = _case_or_404(db, case_id)
+    arts = db.query(Artifact).filter(Artifact.case_id == case_id).order_by(Artifact.timestamp.asc()).all()
+    analysis = analyze_timeline([_art_to_dict(a) for a in arts], case_id=c.id)
+    from app.services.investigation import _usb_transfer_answer
+
+    return {
+        "case": {
+            "case_number": c.case_number,
+            "title": c.title,
+            "investigator": c.investigator,
+            "principle": (
+                "The LLM does not treat general forensic knowledge as evidence. "
+                "It retrieves case-specific events and uses general knowledge only to interpret them. "
+                "Every important conclusion is linked to original evidence IDs."
+            ),
+        },
+        "integrity": [
+            {"id": e.id, "filename": e.filename, "sha256": e.sha256, "ok": e.integrity_ok}
+            for e in c.evidence
+        ],
+        "classification": {
+            "label": f"Possible {analysis.get('category')} / {analysis.get('secondary')}",
+            "priority": analysis.get("priority"),
+            "risk_score": analysis.get("risk_score"),
+            "disclaimer": (analysis.get("risk") or {}).get("disclaimer"),
+        },
+        "risk": analysis.get("risk"),
+        "attack_chain": analysis.get("attack_chain"),
+        "correlations": analysis.get("correlations"),
+        "usb_qa": _usb_transfer_answer(analysis, [_art_to_dict(a) for a in arts]),
+        "timeline": [_art_to_dict(a) for a in arts if a.source_type != "correlated"][:80],
+    }
+
+
 @app.get("/api/cases/{case_id}/report")
 def report(case_id: int, db: Session = Depends(get_db)):
     c = _case_or_404(db, case_id)

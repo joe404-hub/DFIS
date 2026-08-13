@@ -13,8 +13,11 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
     story = [
         Paragraph("DFIS Evidence-Linked Investigation Report", styles["Title"]),
         Paragraph(
-            "AI-assisted findings are investigative aids, not evidence. "
-            "Correlation IDs are links. ATT&amp;CK mappings are hypothesized unless marked observed.",
+            "The LLM does not treat general forensic knowledge as evidence. "
+            "It retrieves case-specific events and uses general knowledge only to interpret them. "
+            "Every important conclusion is linked to original evidence IDs. "
+            "ATT&amp;CK mappings are hypothesized unless marked observed. "
+            "Risk is investigation priority, not probability of crime.",
             styles["Italic"],
         ),
         Spacer(1, 12),

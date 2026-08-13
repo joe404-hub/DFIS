@@ -270,6 +270,7 @@ export default function App() {
                   <Tab label="Relationship graph" />
                   <Tab label="Evidence & custody" />
                   <Tab label="Investigation" />
+                  <Tab label="Report" />
                 </Tabs>
                 <Divider />
                 {tab === 0 && <Box ref={tlRef} sx={{ height: 420, bgcolor: "#08141c" }} />}
@@ -344,6 +345,32 @@ export default function App() {
                       <Typography key={g.correlation_id} variant="body2" sx={{ fontFamily: "IBM Plex Mono", fontSize: 12 }}>
                         {g.timestamp} {g.family} {g.entity} link={g.correlation_id} evidence_ids=
                         {(g.source_event_ids || []).join(",")}
+                      </Typography>
+                    ))}
+                  </Box>
+                )}
+                {tab === 4 && (
+                  <Box sx={{ p: 2, maxHeight: 420, overflow: "auto" }}>
+                    <Typography variant="subtitle1">Evidence-linked investigation report</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                      The LLM does not treat general forensic knowledge as evidence. Every conclusion is linked to event IDs.
+                    </Typography>
+                    <Typography variant="subtitle2">
+                      Possible {inv?.category} / {inv?.secondary}
+                    </Typography>
+                    <Typography variant="body2">
+                      Investigation Priority: {inv?.risk_score}/100 — {inv?.priority || inv?.risk?.priority}
+                    </Typography>
+                    <Typography variant="caption" display="block" sx={{ mb: 1 }}>
+                      {inv?.risk?.disclaimer}
+                    </Typography>
+                    <Button size="small" href={`/api/cases/${active}/report`} target="_blank" sx={{ mb: 1 }}>
+                      Download PDF
+                    </Button>
+                    {(inv?.attack_chain || []).map((s, i) => (
+                      <Typography key={i} variant="body2" sx={{ fontFamily: "IBM Plex Mono", fontSize: 12 }}>
+                        {s.time} {s.title} [{s.mitre || "—"}] {s.status}/{s.confidence} ids=
+                        {(s.evidence_event_ids || []).join(",")}
                       </Typography>
                     ))}
                   </Box>
