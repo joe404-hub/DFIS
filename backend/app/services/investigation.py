@@ -203,16 +203,16 @@ def attack_chain(events: list[dict], groups: list[dict]) -> list[dict]:
             add(g["timestamp"], "Removable media removed", "T1052", g["source_event_ids"], "")
         if g["family"] == "network":
             add(g["timestamp"], "Internal drive / network session", "T1567", g["source_event_ids"], g["entity"])
-    if not any(s["title"].startswith("Internal") for s in steps):
+    if not any(s["title"].startswith("Internal") or "Network/browser" in s["title"] for s in steps):
         net = [e for e in timed if e.get("source_type") in {"network", "browser"}]
-        suspicious = any(g["family"] in {"file_copy", "usb_connect"} for g in groups)
-        if net and suspicious:
+        if net:
+            suspicious = any(g["family"] in {"file_copy", "usb_connect"} for g in groups)
             add(
                 net[0].get("timestamp"),
-                "Network/browser activity (web-exfil hypothesis)",
+                "Network/browser activity" + (" (web-exfil hypothesis)" if suspicious else ""),
                 "T1567",
                 [e.get("id") for e in net[:4]],
-                "Internal drive/TLS observed; T1567 is hypothesized, not proven",
+                "Ordinary or residual network/browser activity; T1567 is hypothesized, not proven",
                 status="hypothesized",
                 confidence="low",
             )

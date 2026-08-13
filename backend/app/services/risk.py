@@ -16,7 +16,8 @@ INDICATORS = [
     {"id": "sensitive", "label": "Sensitive file access", "points": 15},
     {"id": "multi_sensitive", "label": "Multiple distinct sensitive files", "points": 10},
     {"id": "copy", "label": "File copy to transfer / removable path", "points": 20},
-    {"id": "network_after", "label": "Network/browser activity after transfer", "points": 10},
+    {"id": "network", "label": "Network/browser activity", "points": 10},
+    {"id": "network_after", "label": "Network/browser activity after a documented file transfer", "points": 10},
     {"id": "admin", "label": "Administrative logon", "points": 5},
     {"id": "multi_source", "label": "Same activity confirmed by ≥2 artifact types", "points": 10},
 ]
@@ -67,7 +68,8 @@ def score_case(events: list[dict], groups: list[dict]) -> dict:
     ]
     if copy_times and net_ev:
         fire("network_after")
-    # Ordinary HTTPS/browser traffic alone is not "after transfer"
+    elif net_ev or any(e.get("source_type") in {"network", "browser"} for e in events):
+        fire("network")
     if "admin" in blob or any(e.get("event_type") == "admin_logon" for e in events):
         fire("admin")
     if any(len(g.get("source_event_ids") or []) >= 2 for g in groups):
