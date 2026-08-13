@@ -408,11 +408,12 @@ def _benign_answer(inv: dict) -> str:
             "CASE-SPECIFIC EVIDENCE (authoritative for this case): None of the available events establish significant suspicious activity.",
             "",
             "Ordinary network/browser activity may be present, but this alone does not establish exfiltration. "
-            "There is no case-specific evidence presented for USB transfer, sensitive-file copying, "
+            "The available case evidence does not establish USB transfer, sensitive-file copying, "
             "archive creation, or other strong exfiltration indicators.",
             "",
             "Conclusion: No significant suspicious activity identified. "
             "Continue to verify against the original artifacts and hashes if required.",
+            "",
             "General forensic knowledge cannot be used as evidence to upgrade this classification.",
         ]
     )
