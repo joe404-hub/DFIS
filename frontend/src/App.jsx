@@ -41,6 +41,7 @@ export default function App() {
   const [timeline, setTimeline] = useState([]);
   const [graph, setGraph] = useState({ nodes: [], edges: [] });
   const [inv, setInv] = useState(null);
+  const [recs, setRecs] = useState([]);
   const [tab, setTab] = useState(0);
   const [q, setQ] = useState("What is the next step to be taken?");
   const [answer, setAnswer] = useState("");
@@ -66,16 +67,18 @@ export default function App() {
   const loadCase = async (id) => {
     setBusy(true);
     try {
-      const [d, t, g, invr] = await Promise.all([
+      const [d, t, g, invr, recr] = await Promise.all([
         api(`/api/cases/${id}`).then((x) => x.json()),
         api(`/api/cases/${id}/timeline`).then((x) => x.json()),
         api(`/api/cases/${id}/graph`).then((x) => x.json()),
         api(`/api/cases/${id}/investigation`).then((x) => x.json()).catch(() => null),
+        api(`/api/cases/${id}/recommendations`).then((x) => x.json()).catch(() => []),
       ]);
       setDetail(d);
       setTimeline(t);
       setGraph(g);
       setInv(invr);
+      setRecs(Array.isArray(recr) ? recr : recr?.next_actions || []);
       setAnswer("");
     } finally {
       setBusy(false);
@@ -270,6 +273,7 @@ export default function App() {
                   <Tab label="Relationship graph" />
                   <Tab label="Evidence & custody" />
                   <Tab label="Investigation" />
+                  <Tab label="Recommendations" />
                   <Tab label="Report" />
                 </Tabs>
                 <Divider />
@@ -358,6 +362,46 @@ export default function App() {
                   </Box>
                 )}
                 {tab === 4 && (
+                  <Box sx={{ p: 2, maxHeight: 420, overflow: "auto" }}>
+                    <Typography variant="subtitle1">Investigation recommendations</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                      Observed evidence → AI inference → examiner verification. These are tasks, not findings of fact.
+                    </Typography>
+                    {(recs.length ? recs : inv?.next_actions || []).map((a) => (
+                      <Box key={a.id || a.priority} sx={{ mb: 1.5, p: 1.2, border: "1px solid #1d3344", borderRadius: 1 }}>
+                        <Typography variant="subtitle2">
+                          Priority {a.priority} — {a.action}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Reason: {a.reason}
+                        </Typography>
+                        <Typography variant="body2" sx={{ fontFamily: "IBM Plex Mono", fontSize: 12 }}>
+                          Evidence: {(a.evidence_ids || []).join(", ") || "case hashes"}
+                        </Typography>
+                        <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
+                          <Chip size="small" label={(a.status || "pending_examiner_verification").replaceAll("_", " ")} />
+                          {a.id && (
+                            <Button
+                              size="small"
+                              onClick={async () => {
+                                await api(`/api/cases/${active}/recommendations/${a.id}`, {
+                                  method: "PATCH",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ status: "verified" }),
+                                });
+                                const next = await api(`/api/cases/${active}/recommendations`).then((x) => x.json());
+                                setRecs(next);
+                              }}
+                            >
+                              Mark verified
+                            </Button>
+                          )}
+                        </Stack>
+                      </Box>
+                    ))}
+                  </Box>
+                )}
+                {tab === 5 && (
                   <Box sx={{ p: 2, maxHeight: 420, overflow: "auto" }}>
                     <Typography variant="subtitle1">Evidence-linked investigation report</Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>

@@ -121,14 +121,15 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
             styles["Italic"],
         )
     )
-    arows = [["#", "Action", "Reason", "Evidence IDs"]]
+    arows = [["#", "Action", "Reason", "Evidence IDs", "Status"]]
     for a in analysis.get("next_actions") or []:
         arows.append(
             [
                 str(a.get("priority")),
-                (a.get("action") or "")[:40],
-                (a.get("reason") or "")[:70],
+                (a.get("action") or "")[:36],
+                (a.get("reason") or "")[:55],
                 ",".join(str(i) for i in (a.get("evidence_ids") or [])),
+                (a.get("status") or "pending_examiner_verification").replace("_", " "),
             ]
         )
     if len(arows) > 1:

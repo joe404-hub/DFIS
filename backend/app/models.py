@@ -16,6 +16,7 @@ class Case(Base):
     evidence = relationship("Evidence", back_populates="case", cascade="all, delete")
     artifacts = relationship("Artifact", back_populates="case", cascade="all, delete")
     findings = relationship("Finding", back_populates="case", cascade="all, delete")
+    recommendations = relationship("Recommendation", back_populates="case", cascade="all, delete")
 
 
 class Evidence(Base):
@@ -78,6 +79,19 @@ class Finding(Base):
     artifact_ids: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     case = relationship("Case", back_populates="findings")
+
+
+class Recommendation(Base):
+    __tablename__ = "recommendations"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id"))
+    priority: Mapped[int] = mapped_column(Integer, default=1)
+    action: Mapped[str] = mapped_column(String(255))
+    reason: Mapped[str] = mapped_column(Text, default="")
+    evidence_ids: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(64), default="pending_examiner_verification")
+    layer: Mapped[str] = mapped_column(String(32), default="verify")  # observed | inferred | verify
+    case = relationship("Case", back_populates="recommendations")
 
 
 class CustodyEvent(Base):

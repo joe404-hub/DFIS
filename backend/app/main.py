@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db import Base, EVIDENCE_DIR, engine, get_db, migrate
-from app.models import Artifact, Case, CustodyEvent, Evidence, Finding
+from app.models import Artifact, Case, CustodyEvent, Evidence, Finding, Recommendation
 from app.services.analyzer import analyze_timeline, answer_question
 from app.services.integrity import sha256_file
 from app.services.parsers import classify_skipped, parse_file
@@ -41,6 +41,10 @@ class CaseIn(BaseModel):
 
 class ChatIn(BaseModel):
     question: str
+
+
+class RecStatusIn(BaseModel):
+    status: str
 
 
 def _case_or_404(db: Session, case_id: int) -> Case:
@@ -193,6 +197,23 @@ def rebuild_analysis(db: Session, case: Case):
     index_case_events(case.id, events)
     result = analyze_timeline(events, case_id=case.id)
     db.query(Finding).filter(Finding.case_id == case.id).delete()
+    prev = {
+        r.action: r.status
+        for r in db.query(Recommendation).filter(Recommendation.case_id == case.id).all()
+    }
+    db.query(Recommendation).filter(Recommendation.case_id == case.id).delete()
+    for a in result.get("next_actions") or []:
+        db.add(
+            Recommendation(
+                case_id=case.id,
+                priority=int(a.get("priority") or 0),
+                action=a.get("action") or "",
+                reason=a.get("reason") or "",
+                evidence_ids=",".join(str(i) for i in (a.get("evidence_ids") or [])),
+                status=prev.get(a.get("action") or "", a.get("status") or "pending_examiner_verification"),
+                layer=a.get("layer") or "verify",
+            )
+        )
     for f in result["findings"]:
         db.add(
             Finding(
@@ -467,6 +488,59 @@ def reprocess(case_id: int, db: Session = Depends(get_db)):
 def analyze(case_id: int, db: Session = Depends(get_db)):
     c = _case_or_404(db, case_id)
     return rebuild_analysis(db, c)
+
+
+@app.get("/api/cases/{case_id}/recommendations")
+def list_recommendations(case_id: int, db: Session = Depends(get_db)):
+    _case_or_404(db, case_id)
+    rows = (
+        db.query(Recommendation)
+        .filter(Recommendation.case_id == case_id)
+        .order_by(Recommendation.priority.asc())
+        .all()
+    )
+    if not rows:
+        rebuild_analysis(db, db.get(Case, case_id))
+        rows = (
+            db.query(Recommendation)
+            .filter(Recommendation.case_id == case_id)
+            .order_by(Recommendation.priority.asc())
+            .all()
+        )
+    return [
+        {
+            "id": r.id,
+            "priority": r.priority,
+            "action": r.action,
+            "reason": r.reason,
+            "evidence_ids": [int(x) for x in r.evidence_ids.split(",") if x],
+            "status": r.status,
+            "layer": r.layer,
+        }
+        for r in rows
+    ]
+
+
+@app.patch("/api/cases/{case_id}/recommendations/{rec_id}")
+def update_recommendation(case_id: int, rec_id: int, body: RecStatusIn, db: Session = Depends(get_db)):
+    _case_or_404(db, case_id)
+    rec = db.get(Recommendation, rec_id)
+    if not rec or rec.case_id != case_id:
+        raise HTTPException(404, "Recommendation not found")
+    allowed = {"pending_examiner_verification", "in_progress", "verified", "not_applicable"}
+    if body.status not in allowed:
+        raise HTTPException(400, f"status must be one of {sorted(allowed)}")
+    rec.status = body.status
+    db.add(
+        CustodyEvent(
+            case_id=case_id,
+            action="recommendation_status",
+            actor="examiner",
+            detail=f"{rec.action} → {body.status}",
+        )
+    )
+    db.commit()
+    return {"id": rec.id, "status": rec.status}
 
 
 @app.get("/api/cases/{case_id}/investigation")

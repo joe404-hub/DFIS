@@ -22,6 +22,8 @@ def recommend_actions(events: list[dict], groups: list[dict]) -> list[dict]:
                 "action": "Verify E:\\ ↔ USB device mapping",
                 "reason": "Establish whether copies to the transfer path went to the connected removable device. Temporal correlation is not device identity.",
                 "evidence_ids": usb_ids + copy_ids,
+                "status": "pending_examiner_verification",
+                "layer": "verify",
             }
         )
     svc = ids("service") or ev_ids("service_install", "persistence")
@@ -32,6 +34,8 @@ def recommend_actions(events: list[dict], groups: list[dict]) -> list[dict]:
                 "action": "Investigate DemoUpdater / installed service",
                 "reason": "Determine whether the service is legitimate, unauthorized persistence, or synthetic noise.",
                 "evidence_ids": svc,
+                "status": "pending_examiner_verification",
+                "layer": "verify",
             }
         )
     net = [e.get("id") for e in events if e.get("source_type") in {"network", "browser"} and e.get("id")]
@@ -42,6 +46,8 @@ def recommend_actions(events: list[dict], groups: list[dict]) -> list[dict]:
                 "action": "Examine 09:30 network / drive.example.local activity",
                 "reason": "T1567 is a low-confidence hypothesis only. Do not treat TLS/cookie as confirmed exfiltration.",
                 "evidence_ids": net[:8],
+                "status": "pending_examiner_verification",
+                "layer": "verify",
             }
         )
     ps = [e.get("id") for e in events if "powershell" in (e.get("description") or "").lower() and e.get("id")]
@@ -52,6 +58,8 @@ def recommend_actions(events: list[dict], groups: list[dict]) -> list[dict]:
                 "action": "Review PowerShell activity",
                 "reason": "Determine what commands or scripts were executed around 09:04.",
                 "evidence_ids": ps,
+                "status": "pending_examiner_verification",
+                "layer": "verify",
             }
         )
     mem = [e.get("id") for e in events if e.get("source_type") == "memory" and e.get("id")]
@@ -62,6 +70,8 @@ def recommend_actions(events: list[dict], groups: list[dict]) -> list[dict]:
                 "action": "Validate memory snapshot against original acquisition",
                 "reason": "09:40 is observation/capture time, not process start. Corroborate processes and network state.",
                 "evidence_ids": mem,
+                "status": "pending_examiner_verification",
+                "layer": "verify",
             }
         )
     actions.append(
@@ -70,6 +80,8 @@ def recommend_actions(events: list[dict], groups: list[dict]) -> list[dict]:
             "action": "Verify original artifacts and SHA-256 hashes",
             "reason": "Preserve forensic defensibility. AI output is not evidence.",
             "evidence_ids": [],
+            "status": "pending_examiner_verification",
+            "layer": "verify",
         }
     )
     for i, a in enumerate(actions, 1):
