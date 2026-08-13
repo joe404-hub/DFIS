@@ -6,70 +6,80 @@ from .csv_util import parse_ts
 
 SOURCE = "memory"
 
+PROC_RE = re.compile(
+    r"^[-*]\s*(?P<proc>[^\s|]+)\s*\|\s*PID\s*(?P<pid>\d+)\s*\|\s*User\s+(?P<user>.+)$",
+    re.I,
+)
+NET_RE = re.compile(
+    r"^(?:[-*]\s*)?(?P<src>\d+\.\d+\.\d+\.\d+):(?P<sport>\d+)\s*->\s*(?P<dst>\d+\.\d+\.\d+\.\d+):(?P<dport>\d+)"
+)
+
 
 def can_parse(path: Path, name: str, suffix: str, hint: str) -> bool:
     parent = path.parent.name.lower()
-    return "memory" in name or parent == "memory" or suffix in {".mem.txt", ".raw.txt"} or name.endswith(".raw.txt")
+    return "memory" in name or parent == "memory" or name.endswith(".raw.txt")
 
 
 def parse(path: Path) -> list[dict]:
     text = path.read_text(encoding="utf-8", errors="replace")
     events = []
-    # Try "timestamp | type | detail" or "timestamp\tevent"
-    line_re = re.compile(
-        r"^(?P<ts>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)\s*[,|;]\s*(?P<rest>.+)$"
-    )
-    kv_block: dict = {}
+    captured = None
     for raw in text.splitlines():
         line = raw.strip()
-        if not line or line.startswith("#"):
+        if not line:
             continue
-        m = line_re.match(line)
+        if "not a real memory" in line.lower() or line.lower().startswith("synthetic memory"):
+            continue
+        if line.lower().startswith("captured:"):
+            captured = parse_ts(line.split(":", 1)[1].strip())
+            continue
+        if line.lower().startswith("case:") or line.lower().startswith("note:") or line.lower().rstrip(":") in {
+            "processes",
+            "network",
+        }:
+            continue
+        m = PROC_RE.match(line)
         if m:
-            rest = m.group("rest")
-            parts = re.split(r"\s*[|;]\s*", rest, maxsplit=1)
-            et = parts[0].strip()
-            desc = parts[-1].strip()
-            events.append(_ev(parse_ts(m.group("ts")), et, desc, line))
+            proc = m.group("proc")
+            et = "process_create" if "powershell" in proc.lower() or "updater" in proc.lower() else "process_list"
+            events.append(
+                {
+                    "source_type": SOURCE,
+                    "event_type": et,
+                    "timestamp": captured,
+                    "description": (
+                        f"Synthetic memory process list | Process: {proc} | PID: {m.group('pid')} | User: {m.group('user')}"
+                    ),
+                    "actor": m.group("user"),
+                    "target": proc,
+                    "process": proc,
+                    "pid": m.group("pid"),
+                    "raw_data": json.dumps({"line": line, "synthetic": True}),
+                    "parser_name": "memory_text",
+                    "source_file": path.name,
+                }
+            )
             continue
-        if ":" in line and not line.lower().startswith("http"):
-            k, _, v = line.partition(":")
-            key = k.strip().lower()
-            kv_block[key] = v.strip()
-            if key in {"process", "image", "pid", "cmd", "commandline"}:
-                continue
-        else:
-            if kv_block:
-                events.append(_from_kv(kv_block))
-                kv_block = {}
-            low = line.lower()
-            et = "process_list"
-            if "powershell" in low:
-                et = "process_create"
-            elif "usb" in low:
-                et = "usb"
-            events.append(_ev(None, et, line, line))
-    if kv_block:
-        events.append(_from_kv(kv_block))
+        n = NET_RE.search(line)
+        if n:
+            events.append(
+                {
+                    "source_type": SOURCE,
+                    "event_type": "network_flow",
+                    "timestamp": captured,
+                    "description": (
+                        f"Synthetic memory network | {n.group('src')}:{n.group('sport')} → "
+                        f"{n.group('dst')}:{n.group('dport')}"
+                    ),
+                    "actor": n.group("src"),
+                    "target": f"{n.group('dst')}:{n.group('dport')}",
+                    "source_ip": n.group("src"),
+                    "source_port": n.group("sport"),
+                    "destination_ip": n.group("dst"),
+                    "destination_port": n.group("dport"),
+                    "raw_data": json.dumps({"line": line, "synthetic": True}),
+                    "parser_name": "memory_text",
+                    "source_file": path.name,
+                }
+            )
     return events
-
-
-def _from_kv(kv: dict) -> dict:
-    proc = kv.get("process") or kv.get("image") or kv.get("name") or ""
-    pid = kv.get("pid", "")
-    ts = parse_ts(kv.get("timestamp") or kv.get("time"))
-    desc = kv.get("description") or f"Memory artifact process={proc} pid={pid} {kv.get('cmd') or kv.get('commandline') or ''}".strip()
-    et = "process_create" if "powershell" in desc.lower() else "process_list"
-    return _ev(ts, et, desc, json.dumps(kv))
-
-
-def _ev(ts, et, desc, raw):
-    return {
-        "source_type": SOURCE,
-        "event_type": et.lower().replace(" ", "_") if et else "memory_artifact",
-        "timestamp": ts,
-        "description": desc,
-        "actor": "",
-        "target": "",
-        "raw_data": str(raw)[:2000],
-    }

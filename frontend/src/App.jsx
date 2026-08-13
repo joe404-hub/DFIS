@@ -96,7 +96,7 @@ export default function App() {
           content: `<b>${e.event_type}</b><br/>${escapeHtml(e.description).slice(0, 90)}`,
           start: e.timestamp,
           group: e.source_type,
-          className: riskClass(e),
+          className: e.source_type === "correlated" ? "hot" : riskClass(e),
         }))
     );
     const groups = new DataSet(
@@ -286,8 +286,17 @@ export default function App() {
                       Events
                     </Typography>
                     {timeline.map((e) => (
-                      <Typography key={e.id} variant="body2" sx={{ fontFamily: "IBM Plex Mono", fontSize: 12 }}>
-                        [{e.id}] {e.timestamp || "—"} · {e.source_type}/{e.event_type} · {e.description}
+                      <Typography
+                        key={e.id}
+                        variant="body2"
+                        sx={{
+                          fontFamily: "IBM Plex Mono",
+                          fontSize: 12,
+                          color: e.source_type === "correlated" ? "#f4b942" : "inherit",
+                        }}
+                      >
+                        [{e.id}] {e.timestamp || "—"} · {e.source_type}/{e.event_type}
+                        {e.correlation_id ? ` · corr:${e.correlation_id}` : ""} · {e.description}
                       </Typography>
                     ))}
                   </Box>

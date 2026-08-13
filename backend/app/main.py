@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.db import Base, EVIDENCE_DIR, engine, get_db
+from app.db import Base, EVIDENCE_DIR, engine, get_db, migrate
 from app.models import Artifact, Case, CustodyEvent, Evidence, Finding
 from app.services.analyzer import analyze_timeline, answer_question
 from app.services.integrity import sha256_file
@@ -29,6 +29,7 @@ app.add_middleware(
 )
 
 Base.metadata.create_all(bind=engine)
+migrate()
 
 
 class CaseIn(BaseModel):
@@ -62,7 +63,44 @@ def _art_to_dict(a: Artifact) -> dict:
         "target": a.target,
         "raw_data": a.raw_data,
         "fingerprint": a.fingerprint,
+        "parser_name": a.parser_name,
+        "source_file": a.source_file,
+        "correlation_id": a.correlation_id,
+        "process": a.process,
+        "pid": a.pid,
+        "source_path": a.source_path,
+        "destination_path": a.destination_path,
+        "source_ip": a.source_ip,
+        "source_port": a.source_port,
+        "destination_ip": a.destination_ip,
+        "destination_port": a.destination_port,
     }
+
+
+def _artifact_row(case_id: int, evidence_id: int, rec: dict) -> Artifact:
+    return Artifact(
+        case_id=case_id,
+        evidence_id=evidence_id,
+        source_type=rec.get("source_type") or "unknown",
+        event_type=rec.get("event_type") or "event",
+        timestamp=rec.get("timestamp"),
+        description=rec.get("description") or "",
+        actor=rec.get("actor") or "",
+        target=(rec.get("target") or "")[:512],
+        raw_data=rec.get("raw_data") or "",
+        fingerprint=rec.get("fingerprint") or "",
+        parser_name=rec.get("parser_name") or "",
+        source_file=rec.get("source_file") or "",
+        correlation_id=rec.get("correlation_id") or "",
+        process=rec.get("process") or "",
+        pid=str(rec.get("pid") or ""),
+        source_path=rec.get("source_path") or "",
+        destination_path=rec.get("destination_path") or "",
+        source_ip=rec.get("source_ip") or "",
+        source_port=str(rec.get("source_port") or ""),
+        destination_ip=rec.get("destination_ip") or "",
+        destination_port=str(rec.get("destination_port") or ""),
+    )
 
 
 def process_evidence_file(db: Session, case: Case, dest: Path, original_name: str, notes: str = "") -> Evidence:
@@ -410,20 +448,7 @@ def reprocess(case_id: int, db: Session = Depends(get_db)):
                 )
             )
         for rec in build_timeline(raw):
-            db.add(
-                Artifact(
-                    case_id=c.id,
-                    evidence_id=ev.id,
-                    source_type=rec.get("source_type") or "unknown",
-                    event_type=rec.get("event_type") or "event",
-                    timestamp=rec.get("timestamp"),
-                    description=rec.get("description") or "",
-                    actor=rec.get("actor") or "",
-                    target=rec.get("target") or "",
-                    raw_data=rec.get("raw_data") or "",
-                    fingerprint=rec.get("fingerprint") or "",
-                )
-            )
+            db.add(_artifact_row(c.id, ev.id, rec))
     db.commit()
     return rebuild_analysis(db, c)
 

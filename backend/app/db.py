@@ -26,3 +26,25 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def migrate():
+    """Add columns introduced after the first SQLite schema."""
+    cols = {
+        "parser_name": "VARCHAR(64) DEFAULT ''",
+        "source_file": "VARCHAR(255) DEFAULT ''",
+        "correlation_id": "VARCHAR(64) DEFAULT ''",
+        "process": "VARCHAR(255) DEFAULT ''",
+        "pid": "VARCHAR(32) DEFAULT ''",
+        "source_path": "VARCHAR(512) DEFAULT ''",
+        "destination_path": "VARCHAR(512) DEFAULT ''",
+        "source_ip": "VARCHAR(64) DEFAULT ''",
+        "source_port": "VARCHAR(16) DEFAULT ''",
+        "destination_ip": "VARCHAR(64) DEFAULT ''",
+        "destination_port": "VARCHAR(16) DEFAULT ''",
+    }
+    with engine.begin() as conn:
+        existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(artifacts)")}
+        for name, ddl in cols.items():
+            if name not in existing:
+                conn.exec_driver_sql(f"ALTER TABLE artifacts ADD COLUMN {name} {ddl}")

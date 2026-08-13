@@ -45,32 +45,48 @@ def analyze_timeline(events: list[dict]) -> dict:
                 if re.search(pat, text):
                     supporting.append(e.get("id"))
     score = min(100, score)
-    if score >= 45 and ("usb" in hits or "cloud" in hits) and "archive" in hits:
+    theftish = ("usb" in hits or "cloud" in hits or "exfil_copy" in hits) and (
+        "archive" in hits or "collection" in hits or "exfil_copy" in hits
+    )
+    if score >= 30 and theftish:
         category = "Data Theft"
-        if any("user" in str(e.get("actor", "")).lower() or "logon" in str(e.get("event_type", "")).lower() for e in events):
-            # insider-ish if valid logon then theft
+        if any(
+            e.get("actor") or "logon" in str(e.get("event_type", "")).lower()
+            for e in events
+        ):
             category = "Insider Threat"
     elif "ransom" in hits:
         category = "Ransomware"
     elif "creds" in hits and score >= 12:
         category = "Credential Abuse"
-    elif "persist" in hits or "exec" in hits:
+    elif "persist" in hits and "usb" not in hits:
         category = "Malware Infection"
     elif score < 10:
         category = "Normal Activity"
     else:
         category = "Unauthorized Access" if "access" in hits else "Insider Threat"
 
+    bullets = []
+    for e in sorted(events, key=lambda x: x.get("timestamp") or ""):
+        if e.get("source_type") == "correlated":
+            bullets.append(f"- {e.get('timestamp')}: {e.get('description')}")
+    if not bullets:
+        for e in events:
+            if e.get("event_type") in {"file_copy", "usb_connect", "usb_remove", "logon", "process_create"}:
+                bullets.append(f"- [{e.get('id')}] {e.get('timestamp')} {e.get('description')}")
+    narrative = (
+        f"Preliminary classification: possible {category}. "
+        "Findings are consistent with the reconstructed timeline; they do not prove intent.\n"
+        + ("\n".join(bullets[:12]) if bullets else "No correlated multi-source activities identified.")
+        + f"\nIndicators: {', '.join(hits) or 'none'}. "
+        "AI is an assistant, not an evidence source."
+    )
+
     findings = [
         {
             "category": category,
-            "title": f"Likely incident: {category}",
-            "body": (
-                "Rule-based + pattern analysis of the unified timeline. "
-                f"Triggered indicators: {', '.join(hits) or 'none'}. "
-                "This is an investigative hypothesis, not a legal conclusion. "
-                "Review linked artifacts and original SHA-256 hashed evidence."
-            ),
+            "title": f"Possible {category}",
+            "body": narrative,
             "risk_score": float(score),
             "confidence": 0.55 if score < 30 else 0.72 if score < 60 else 0.84,
             "attack_stage": " → ".join(dict.fromkeys(stages)),
