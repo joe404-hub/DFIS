@@ -71,6 +71,21 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const [ingestModal, setIngestModal] = useState(null);
+  const [acquireModal, setAcquireModal] = useState(false);
+  const [acquireMode, setAcquireMode] = useState("automated_collection");
+  const [policy, setPolicy] = useState({
+    collect_security_logs: true,
+    collect_system_logs: true,
+    collect_powershell_logs: true,
+    collect_registry: true,
+    collect_browser_history: true,
+    collect_browser_downloads: true,
+    collect_filesystem: true,
+    collect_prefetch: true,
+    collect_amcache: true,
+    collect_network: true,
+    collect_memory: false,
+  });
   const [search, setSearch] = useState("");
   const [sourceFilter, setSourceFilter] = useState("all");
   const [selectedEvent, setSelectedEvent] = useState(null);
@@ -183,6 +198,33 @@ export default function App() {
       await loadCase(active);
     } catch (err) {
       alert("Upload failed: " + err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startAcquisition = async () => {
+    setBusy(true);
+    try {
+      const res = await api(`/api/cases/${active}/acquire`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: acquireMode,
+          policy: policy,
+          notes: `Authorized acquisition by ${detail?.investigator || "Examiner"}`,
+        }),
+      }).then((x) => x.json());
+      setAcquireModal(false);
+      setIngestModal({
+        filename: res.package_filename,
+        sha256: res.package_sha256,
+        summary: res.report.ingestion_summary,
+      });
+      await loadCases();
+      await loadCase(active);
+    } catch (err) {
+      alert("Acquisition failed: " + err);
     } finally {
       setBusy(false);
     }
@@ -372,22 +414,32 @@ export default function App() {
               <Stack direction={{ xs: "column", lg: "row" }} spacing={2} justifyContent="space-between" alignItems="center">
                 <Box>
                   <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "#4fc3f7", display: "flex", alignItems: "center", gap: 1 }}>
-                    <AutoFixHighIcon fontSize="small" /> Automated Evidence Ingestion Engine
+                    <AutoFixHighIcon fontSize="small" /> Automated Evidence Acquisition & Ingestion Engine
                   </Typography>
                   <Typography variant="caption" sx={{ color: "#b0bec5" }}>
-                    Pipeline: Upload ZIP/Folder ➔ SHA-256 Integrity ➔ Content Magic Detection (EVTX, Registry, SQLite, PCAP) ➔ Specialized Parsers ➔ Unified Timeline ➔ Case RAG
+                    Acquisition (Manual/Automated/Hybrid) ➔ SHA-256 Check ➔ Content Detection (EVTX, Registry, Browser, Prefetch, Amcache, PCAP) ➔ Extraction ➔ Unified Timeline ➔ Case RAG
                   </Typography>
                 </Box>
                 <Stack direction="row" spacing={1.5}>
                   <Button
                     variant="contained"
-                    component="label"
                     color="primary"
+                    startIcon={<SecurityIcon />}
+                    onClick={() => setAcquireModal(true)}
+                    disabled={busy}
+                    sx={{ fontWeight: 700 }}
+                  >
+                    Acquire Evidence (Policy Agent)
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    component="label"
+                    color="inherit"
                     startIcon={<CloudUploadIcon />}
                     disabled={busy}
-                    sx={{ fontWeight: 600 }}
+                    sx={{ borderColor: "#28455e", fontWeight: 600 }}
                   >
-                    Ingest Case ZIP / Evidence
+                    Import Case ZIP
                     <input hidden type="file" onChange={(e) => e.target.files[0] && upload(e.target.files[0])} />
                   </Button>
                   <Button
@@ -947,6 +999,136 @@ export default function App() {
           </Container>
         )}
       </Box>
+
+      {/* Evidence Acquisition Modal Dialog */}
+      <Dialog open={acquireModal} onClose={() => setAcquireModal(false)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ bgcolor: "#091724", color: "#4fc3f7", fontWeight: 700, display: "flex", alignItems: "center", gap: 1 }}>
+          <SecurityIcon /> Investigator-Controlled Evidence Acquisition
+        </DialogTitle>
+        <DialogContent sx={{ bgcolor: "#060d14", color: "#cfd8dc", pt: 2 }}>
+          <Typography variant="body2" sx={{ color: "#b0bec5", mb: 2 }}>
+            Select an authorized acquisition mode and collection policy. The automated collection agent will collect forensic artifacts, verify hashes with SHA-256, package the evidence, and feed it into the Extraction Engine.
+          </Typography>
+
+          {/* Acquisition Mode Selector */}
+          <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "#81d4fa", mb: 1 }}>
+            1. Select Acquisition Mode
+          </Typography>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mb: 3 }}>
+            {[
+              { id: "automated_collection", title: "Automated Endpoint Collection", desc: "Policy-driven automated collection agent" },
+              { id: "manual_import", title: "Manual Evidence Import", desc: "Import pre-acquired case ZIP/files" },
+              { id: "hybrid_collection", title: "Hybrid Acquisition", desc: "Combined import + targeted gap collection" },
+            ].map((m) => (
+              <Paper
+                key={m.id}
+                onClick={() => setAcquireMode(m.id)}
+                sx={{
+                  p: 1.5,
+                  flex: 1,
+                  cursor: "pointer",
+                  bgcolor: acquireMode === m.id ? "#0d283d" : "#08131d",
+                  border: acquireMode === m.id ? "1px solid #0288d1" : "1px solid #162b3d",
+                  borderRadius: 1.5,
+                }}
+              >
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: acquireMode === m.id ? "#4fc3f7" : "#eceff1", fontSize: 13 }}>
+                  {m.title}
+                </Typography>
+                <Typography variant="caption" sx={{ color: "#90a4ae", display: "block", mt: 0.5 }}>
+                  {m.desc}
+                </Typography>
+              </Paper>
+            ))}
+          </Stack>
+
+          {/* Collection Policy Checklist */}
+          <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "#81d4fa", mb: 1 }}>
+            2. Investigator-Controlled Collection Policy Checklist
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
+            Select which forensic artifact categories the automated agent is authorized to collect:
+          </Typography>
+
+          <Stack spacing={1.5} sx={{ mb: 2 }}>
+            {[
+              {
+                group: "Windows Event Logs & Execution Traces",
+                items: [
+                  { key: "collect_security_logs", label: "Windows Security Logs (Logon 4624, Process 4688, USB 6416)" },
+                  { key: "collect_system_logs", label: "Windows System Logs (Service 7045, State Change 7036)" },
+                  { key: "collect_powershell_logs", label: "PowerShell Operational Logs (Script Block 4104, Pipeline 4103)" },
+                  { key: "collect_prefetch", label: "Prefetch Execution Traces (.pf application run counts & timestamps)" },
+                  { key: "collect_amcache", label: "Amcache Application Evidence (Amcache.hve program execution & SHA-1 hashes)" },
+                ],
+              },
+              {
+                group: "Registry, User Activity & File System",
+                items: [
+                  { key: "collect_registry", label: "Registry Hives (USBSTOR devices, RecentDocs, Run Persistence, UserAssist)" },
+                  { key: "collect_browser_history", label: "Browser History & Omnibox Searches (Chrome, Edge, Firefox, Brave)" },
+                  { key: "collect_browser_downloads", label: "Browser Downloads & Session Cookies" },
+                  { key: "collect_filesystem", label: "File System Activity & Metadata (File open, modified, copy logs)" },
+                ],
+              },
+              {
+                group: "Network & Volatile State",
+                items: [
+                  { key: "collect_network", label: "Network Traffic Logs & Captures (PCAP, DNS queries, TLS handshakes)" },
+                  { key: "collect_memory", label: "Memory Snapshot (Volatile process list & active network sockets — restricted)" },
+                ],
+              },
+            ].map((grp, gidx) => (
+              <Paper key={gidx} sx={{ p: 1.5, bgcolor: "#08131d", border: "1px solid #162b3d", borderRadius: 1.5 }}>
+                <Typography variant="caption" sx={{ fontWeight: 700, color: "#ffb74d", textTransform: "uppercase", display: "block", mb: 1 }}>
+                  {grp.group}
+                </Typography>
+                <Stack spacing={0.8}>
+                  {grp.items.map((it) => (
+                    <Box
+                      key={it.key}
+                      onClick={() => setPolicy({ ...policy, [it.key]: !policy[it.key] })}
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        cursor: "pointer",
+                        p: 0.5,
+                        borderRadius: 1,
+                        "&:hover": { bgcolor: "#0d2030" },
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={Boolean(policy[it.key])}
+                        onChange={() => {}}
+                        style={{ marginRight: 8, accentColor: "#0288d1", cursor: "pointer" }}
+                      />
+                      <Typography variant="body2" sx={{ fontSize: 13, color: policy[it.key] ? "#e0f2f1" : "#78909c" }}>
+                        {it.label}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Stack>
+              </Paper>
+            ))}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ bgcolor: "#091724", px: 3, py: 2 }}>
+          <Button onClick={() => setAcquireModal(false)} sx={{ color: "#90a4ae" }}>
+            Cancel
+          </Button>
+          <Button
+            onClick={startAcquisition}
+            variant="contained"
+            color="primary"
+            disabled={busy}
+            startIcon={<SecurityIcon />}
+            sx={{ fontWeight: 700, px: 3 }}
+          >
+            Start Authorized Collection
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Ingestion Report Modal */}
       {ingestModal && (

@@ -12,6 +12,7 @@ from typing import Any
 from app.services.detector import DetectionResult, detect_file_type
 
 from . import (
+    amcache_parser,
     browser_parser,
     csv_util,
     evtx_parser,
@@ -20,6 +21,7 @@ from . import (
     memory_parser,
     meta_parser,
     pcap_parser,
+    prefetch_parser,
     registry_parser,
     tabular_parser,
 )
@@ -28,6 +30,8 @@ PARSER_MODULES = [
     evtx_parser,
     registry_parser,
     browser_parser,
+    prefetch_parser,
+    amcache_parser,
     tabular_parser,
     pcap_parser,
     memory_parser,
@@ -89,6 +93,12 @@ def parse_file(path: Path, source_hint: str = "", detection: DetectionResult | N
         routed = True
     elif detection.artifact_type == "registry_hive":
         events.extend(registry_parser.parse(path))
+        routed = True
+    elif detection.artifact_type == "amcache":
+        events.extend(amcache_parser.parse(path))
+        routed = True
+    elif detection.artifact_type == "prefetch":
+        events.extend(prefetch_parser.parse(path))
         routed = True
     elif detection.artifact_type == "browser_sqlite":
         events.extend(browser_parser.parse(path))

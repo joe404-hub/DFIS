@@ -60,6 +60,24 @@ class RecStatusIn(BaseModel):
     status: str
 
 
+class AcquireIn(BaseModel):
+    mode: str = "automated_collection"  # manual_import, automated_collection, hybrid_collection
+    policy: dict[str, bool] = {
+        "collect_security_logs": True,
+        "collect_system_logs": True,
+        "collect_powershell_logs": True,
+        "collect_registry": True,
+        "collect_browser_history": True,
+        "collect_browser_downloads": True,
+        "collect_filesystem": True,
+        "collect_prefetch": True,
+        "collect_amcache": True,
+        "collect_network": True,
+        "collect_memory": False,
+    }
+    notes: str = ""
+
+
 def _case_or_404(db: Session, case_id: int) -> Case:
     c = db.get(Case, case_id)
     if not c:
@@ -328,6 +346,25 @@ async def upload_evidence(case_id: int, file: UploadFile = File(...), db: Sessio
         "magic_signature": ev.magic_signature,
         "artifact_count": ev.artifact_count,
         "summary": asdict(summary),
+        "analysis": analysis,
+    }
+
+
+@app.post("/api/cases/{case_id}/acquire")
+def acquire_evidence(case_id: int, body: AcquireIn, db: Session = Depends(get_db)):
+    """Execute authorized policy-driven automated endpoint acquisition, compute SHA-256, and ingest."""
+    c = _case_or_404(db, case_id)
+    from app.services.acquisition import AutomatedEvidenceCollector, AcquisitionPolicy
+    pol = AcquisitionPolicy(**body.policy)
+    collector = AutomatedEvidenceCollector(db, c)
+    ev, report = collector.run_authorized_collection(pol, mode=body.mode, notes=body.notes)
+    analysis = rebuild_analysis(db, c)
+
+    return {
+        "evidence_id": ev.id,
+        "package_filename": report.package_filename,
+        "package_sha256": report.package_sha256,
+        "report": asdict(report),
         "analysis": analysis,
     }
 

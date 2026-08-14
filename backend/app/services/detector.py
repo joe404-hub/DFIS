@@ -82,6 +82,9 @@ MAGIC_SIGNATURES = [
     (b"DU64", 0, "memory", "memory", "windows_dump_64", "Windows 64-bit Memory Dump", "application/x-dmp"),
     (b"PAGE", 0, "memory", "memory", "windows_page_dump", "Windows Page Memory Dump", "application/x-dmp"),
     (b"MDMP", 0, "memory", "memory", "minidump", "Windows Minidump", "application/x-dmp"),
+    # Windows Prefetch: "SCCA" at offset 4 or "MAM\x04" at offset 0
+    (b"SCCA", 4, "prefetch", "filesystem", "windows_prefetch", "SCCA (Windows Prefetch Binary)", "application/octet-stream"),
+    (b"MAM\x04", 0, "prefetch", "filesystem", "windows_prefetch_mam", "MAM (Compressed Windows Prefetch)", "application/octet-stream"),
     # NTFS MFT Record: "FILE" / "BAAD"
     (b"FILE", 0, "filesystem", "filesystem", "ntfs_mft", "NTFS MFT Record", "application/octet-stream"),
 ]
@@ -249,6 +252,17 @@ def _classify_registry_hive(path: Path, chunk: bytes, base_desc: str, mime: str)
     desc = "Windows Registry Hive"
 
     chunk_str = chunk.decode("latin1", errors="ignore").upper()
+    if "AMCACHE" in name_upper or "ROOT\\FILE" in chunk_str:
+        return DetectionResult(
+            artifact_type="amcache",
+            canonical_source_type="registry",
+            subtype="amcache_hive",
+            magic_signature="regf (Windows Amcache Hive)",
+            mime_type=mime,
+            confidence=1.0,
+            description="Windows Amcache Application Execution & Hash Hive",
+        )
+
     if "CURRENTCONTROLSET" in chunk_str or "CONTROLSET001" in chunk_str or "SYSTEM" in name_upper:
         subtype = "system_hive"
         desc = "Windows SYSTEM Registry Hive (Services, USBSTOR, Mounted Devices)"
@@ -417,6 +431,8 @@ def _extension_fallback(path: Path) -> DetectionResult:
 
     if suf == ".evtx":
         return DetectionResult("evtx", "windows_event", "windows_evtx", "Extension (.evtx)", "application/x-ms-evtx", 0.7, "Windows Event Log")
+    if suf == ".pf":
+        return DetectionResult("prefetch", "filesystem", "windows_prefetch", "Extension (.pf)", "application/octet-stream", 0.7, "Windows Prefetch")
     if suf in {".hiv", ".hive", ".dat"} or name in {"ntuser.dat", "system", "software", "sam", "security"}:
         return DetectionResult("registry_hive", "registry", "registry_hive", "Extension/Name (Registry)", "application/x-ms-registry", 0.7, "Windows Registry Hive")
     if suf in {".sqlite", ".db"} or name in {"history", "places.sqlite", "cookies.sqlite", "web data"}:
