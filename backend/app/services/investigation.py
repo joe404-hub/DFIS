@@ -2,17 +2,21 @@
 
 Implements:
 - 4-Tier Forensic Evidentiary States (OBSERVED, SUPPORTED HYPOTHESIS, INSUFFICIENT EVIDENCE, NOT ESTABLISHED)
-- Strict Query Classification (separating Greetings / General Forensic Q&A / Case Investigation)
+- Strict Query Intent Classification:
+  1. GREETING (casual greetings, assistant guidance)
+  2. GENERAL (forensic/technical concept definitions with optional case context)
+  3. HYBRID (evaluating a technical concept applied directly to the case)
+  4. CASE_INVESTIGATION (evidence-grounded case queries)
 - Evidence Relevance Verification
 - Eight Forensic Grounding Rules:
   1. No evidence → don't claim it happened (state NOT ESTABLISHED)
   2. Hypothesis → explicitly label it hypothesis with confidence & rationale
-  3. General knowledge → never present as case evidence
+  3. General knowledge → never present as case evidence (disclaimer)
   4. Case classification → inherit authoritative case state
   5. Risk score → inherit authoritative case score
   6. Case-specific claims → cite exact evidence event IDs
   7. Correlation IDs → clearly identified as analytical relationships, not evidence artifacts
-  8. Greeting/casual queries → respond politely as assistant without injecting case findings
+  8. Greeting/general queries → don't dump the incident classification template
 """
 
 from __future__ import annotations
@@ -35,19 +39,41 @@ GREETING_REGEX = re.compile(
     re.I,
 )
 
+TECHNICAL_CONCEPTS = [
+    "https", "http", "tls", "ssl", "port 443", "port 80", "port 53", "dns",
+    "pcap", "pcapng", "evtx", "event id 4624", "event id 4688", "event id 7045",
+    "event 4624", "event 4688", "event 7045", "event 6416", "event 4104",
+    "t1078", "t1567", "t1052", "t1059", "t1543", "t1005", "mitre", "att&ck",
+    "sha-256", "sha256", "hash", "integrity", "usbstor", "userassist", "recentdocs",
+    "run key", "mft", "$mft", "prefetch", "amcache", "volatility", "memory snapshot"
+]
+
 
 def classify_user_query(question: str) -> str:
-    """Classify user query into: greeting, general, or case_investigation."""
+    """Classify user query into: greeting, general, hybrid, or case_investigation."""
     q_stripped = question.strip()
     if GREETING_REGEX.match(q_stripped):
         return "greeting"
 
     q_low = q_stripped.lower()
-    # General forensic knowledge definition query
-    if (
-        (q_low.startswith("what is mitre") or q_low.startswith("what is t1") or q_low.startswith("explain mitre") or q_low.startswith("what is an mft") or q_low.startswith("what is evtx") or q_low.startswith("what is prefetch") or q_low.startswith("what is amcache"))
-        and not any(k in q_low for k in ("this case", "in the case", "our case", "observed", "evidence", "found"))
-    ):
+
+    # Check if asks for definition/concept explanation
+    is_definition = bool(re.search(
+        r"\b(means|meaning|definition|stand for|stands for|what is|what does|explain|define|tell me about|how does)\b",
+        q_low,
+    ))
+    has_concept = any(re.search(r"\b" + re.escape(c) + r"\b", q_low) for c in TECHNICAL_CONCEPTS)
+    is_case_specific = any(k in q_low for k in (
+        "this case", "in the case", "our case", "was confidential", "was data",
+        "was usb", "did the user", "next step", "recommend", "tasks", "timeline",
+        "indicate exfiltration", "exfiltrated in this case", "evidence of"
+    ))
+
+    if is_case_specific and has_concept:
+        return "hybrid"
+    if is_definition and has_concept:
+        return "general"
+    if is_definition or (has_concept and len(q_low.split()) <= 4 and not is_case_specific):
         return "general"
 
     return "case_investigation"
@@ -373,13 +399,12 @@ def get_suggested_queries(inv: dict) -> list[str]:
     ev_states = {s["finding"]: s["state"] for s in inv.get("evidentiary_states", [])}
 
     if ev_states.get("User authentication") == "OBSERVED":
-        queries.append("Was the valid account legitimately used?")
+        queries.append("Was the valid account legitimately used at 09:00?")
     if ev_states.get("Network/browser activity") == "OBSERVED":
-        queries.append("What activity is associated with chrome.exe or network endpoints?")
-    if ev_states.get("Possible network-based transfer") in {"INSUFFICIENT EVIDENCE", "SUPPORTED HYPOTHESIS"}:
-        queries.append("What is the identity and purpose of internal endpoint 10.0.0.20:443?")
+        queries.append("What activity is associated with chrome.exe at 09:05?")
+        queries.append("What is 10.0.0.20:443?")
     if ev_states.get("USB connection") == "NOT ESTABLISHED":
-        queries.append("Is there evidence of USB / removable-media activity?")
+        queries.append("Is there evidence of USB/removable-media activity?")
     elif ev_states.get("USB connection") == "OBSERVED":
         queries.append("Was confidential data copied to the connected USB device?")
     if ev_states.get("Confidential-file copying") == "NOT ESTABLISHED":
@@ -486,25 +511,127 @@ def _greeting_response() -> str:
     )
 
 
-def _general_knowledge_response(question: str, rag: dict) -> str:
-    """Respond to generic forensic definitions/concepts with explicit general-knowledge disclaimer."""
-    know_lines = (rag.get("knowledge") or [])
-    body = "\n".join(f"- {k}" for k in know_lines[:3]) if know_lines else (
+def get_concept_definition(query: str) -> tuple[str, str]:
+    """Return authoritative forensic concept definition for technical terms."""
+    q_low = query.lower()
+
+    if "https" in q_low or "http" in q_low or "tls" in q_low or "ssl" in q_low or "443" in q_low:
+        return (
+            "What does HTTPS mean?",
+            "HTTPS stands for Hypertext Transfer Protocol Secure.\n\n"
+            "It is the secure version of HTTP. HTTPS uses TLS (Transport Layer Security) encryption "
+            "to protect data exchanged between a browser and a web server and helps provide confidentiality "
+            "and integrity of the communication over TCP port 443."
+        )
+    if "t1078" in q_low or "valid account" in q_low:
+        return (
+            "What is MITRE ATT&CK T1078 (Valid Accounts)?",
+            "MITRE ATT&CK T1078 (Valid Accounts) refers to the use of legitimate credentials to access systems. "
+            "In forensic logs, Windows Security Event 4624 proves authentication occurred, but does not by itself "
+            "establish that the account was compromised or used without authorization."
+        )
+    if "t1567" in q_low or "exfil over web" in q_low:
+        return (
+            "What is MITRE ATT&CK T1567 (Exfiltration Over Web Service)?",
+            "MITRE ATT&CK T1567 refers to transferring sensitive data to external cloud storage or web services. "
+            "Forensically, web/browser activity alone represents an unconfirmed hypothesis; establishing exfiltration "
+            "requires corroborating evidence of sensitive file staging, file copying, and transmission."
+        )
+    if "t1052" in q_low or "usbstor" in q_low or "usb" in q_low:
+        return (
+            "What is MITRE ATT&CK T1052 (Exfiltration Over Physical Medium)?",
+            "MITRE ATT&CK T1052 involves copying data to removable USB storage. In Windows forensics, USB connections "
+            "are tracked in the SYSTEM registry hive under CurrentControlSet\\Enum\\USBSTOR and Security Event 6416/20001."
+        )
+    if "prefetch" in q_low or ".pf" in q_low:
+        return (
+            "What is Windows Prefetch?",
+            "Windows Prefetch (.pf) files are execution artifacts created to optimize application loading. "
+            "Forensically, Prefetch proves that a specific binary executed on the system, recording executable name, "
+            "run count, execution timestamps, and referenced files."
+        )
+    if "amcache" in q_low:
+        return (
+            "What is Windows Amcache?",
+            "Amcache.hve is a Windows registry hive located in %SystemRoot%\\appcompat\\Programs\\Amcache.hve. "
+            "It tracks application execution and installation details, including executable full paths, "
+            "SHA-1 application hashes, file sizes, and compile times."
+        )
+    if "sha-256" in q_low or "sha256" in q_low or "hash" in q_low:
+        return (
+            "What is SHA-256 Hash Verification?",
+            "SHA-256 is a cryptographic hash algorithm producing a unique 64-character hexadecimal digest for any file. "
+            "In digital forensics, SHA-256 verifies evidence integrity and proves that files have not been modified, "
+            "altered, or corrupted since acquisition."
+        )
+    if "mft" in q_low:
+        return (
+            "What is the Master File Table ($MFT)?",
+            "The Master File Table ($MFT) is the central filesystem database in NTFS that records all file metadata, "
+            "standard information timestamps (created, modified, MFT altered, accessed), file sizes, and cluster allocations."
+        )
+
+    return (
+        f"Explanation for {query.strip()}:",
         "Digital forensics principles require establishing direct provenance, cryptographic hashes, "
         "and independent artifact corroboration before concluding that malicious activity occurred."
     )
-    return "\n".join(
-        [
-            f"Question: {question}",
-            "",
-            "Forensic Concept Explanation:",
-            body,
-            "",
-            "GENERAL FORENSIC KNOWLEDGE DISCLAIMER:",
-            "This explanation describes general digital forensics principles. "
-            "It is interpretive only and cannot be used as case evidence.",
-        ]
-    )
+
+
+def _concept_response(question: str, events: list[dict], inv: dict, is_hybrid: bool = False) -> str:
+    """Format tailored response for General and Hybrid questions."""
+    q_title, definition = get_concept_definition(question)
+    q_low = question.lower()
+
+    lines = [
+        f"Question: {q_title}",
+        "",
+        definition,
+    ]
+
+    # Find relevant case context
+    relevant_events = []
+    if "https" in q_low or "http" in q_low or "tls" in q_low or "443" in q_low:
+        relevant_events = [e for e in events if e.get("source_type") in {"network", "browser"}]
+    elif "t1078" in q_low or "logon" in q_low or "auth" in q_low:
+        relevant_events = [e for e in events if e.get("event_type") in {"logon", "admin_logon"}]
+    elif "t1567" in q_low or "exfil" in q_low:
+        relevant_events = [e for e in events if e.get("source_type") in {"network", "browser"}]
+    elif "usb" in q_low or "usbstor" in q_low:
+        relevant_events = [e for e in events if "usb" in str(e.get("event_type", "")).lower() or "usb" in str(e.get("source_type", "")).lower()]
+    elif "prefetch" in q_low:
+        relevant_events = [e for e in events if "prefetch" in str(e.get("artifact_type", "")).lower()]
+    elif "amcache" in q_low:
+        relevant_events = [e for e in events if "amcache" in str(e.get("artifact_type", "")).lower()]
+
+    if relevant_events or is_hybrid:
+        lines.append("")
+        lines.append("CASE-SPECIFIC CONTEXT:")
+        if relevant_events:
+            lines.append("The current case contains related activity involving:")
+            for ev in relevant_events[:4]:
+                ts = str(ev.get("timestamp") or "Observation").replace("T", " ")
+                ent = ev.get("target") or ev.get("object") or ev.get("process") or "endpoint"
+                lines.append(f"- {ts} — {ent} — evidence IDs [{ev.get('id')}]")
+        else:
+            lines.append(f"No specific artifacts matching this concept were found in the currently ingested evidence.")
+
+        if "https" in q_low or "443" in q_low or "tls" in q_low:
+            lines.append("")
+            lines.append("The presence of HTTPS or TCP port 443 indicates encrypted web/network communication, but by itself it does not establish:")
+            lines.append("• data exfiltration,")
+            lines.append("• confidential-file transfer,")
+            lines.append("• malicious activity, or")
+            lines.append("• unauthorized account use.")
+        elif "t1078" in q_low or "logon" in q_low:
+            lines.append("")
+            lines.append("The presence of valid-account authentication establishes that logon occurred, but by itself does not establish unauthorized account use or compromise.")
+
+    lines.append("")
+    lines.append("General forensic knowledge is interpretive only and cannot be used as case evidence.")
+    lines.append("")
+    lines.append("AI is an investigative assistant, not an evidence source.")
+    return "\n".join(lines)
 
 
 def answer_question(question: str, rag: dict, events: list[dict], inv: dict) -> str:
@@ -515,11 +642,11 @@ def answer_question(question: str, rag: dict, events: list[dict], inv: dict) -> 
     if q_type == "greeting":
         return _greeting_response()
 
-    # 2. Routing: General Forensic Concept queries
-    if q_type == "general":
-        return _general_knowledge_response(question, rag)
+    # 2. Routing: General Forensic Concept queries & Hybrid queries
+    if q_type == "general" or q_type == "hybrid":
+        return _concept_response(question, events, inv, is_hybrid=(q_type == "hybrid"))
 
-    # 3. Routing: Case Investigation queries
+    # 3. Routing: Case-Specific Investigation queries
     q = question.lower()
     lines = [
         f"Question: {question}",
@@ -537,13 +664,40 @@ def answer_question(question: str, rag: dict, events: list[dict], inv: dict) -> 
         lines.append("AI is an investigative assistant, not an evidence source. All tasks are examiner verification steps.")
         return "\n".join(lines)
 
-    # USB / Exfiltration Query
-    if any(k in q for k in ("usb", "removable", "exfil", "copied", "copy", "transfer", "confidential", "sensitive", "staged")):
+    # USB / Physical Removable Media Query
+    if any(k in q for k in ("usb", "removable", "usbstor", "flash drive", "thumb drive")):
         usb_ans = _usb_transfer_answer(inv, events)
         if usb_ans:
             lines.append(usb_ans)
         else:
             lines.append(_no_usb_answer(inv))
+        lines.append("")
+        lines.append("General forensic knowledge is interpretive only and cannot be used as case evidence.")
+        lines.append("AI is an investigative assistant, not an evidence source.")
+        return "\n".join(lines)
+
+    # Network / Browser / Web Exfiltration Query
+    if any(k in q for k in ("network", "browser", "chrome", "10.0.0", "endpoint", "url", "drive", "t1567", "connection", "exfil", "exfiltration")):
+        net_evs = [e for e in events if e.get("source_type") in {"network", "browser"}]
+        copies = [e for e in events if e.get("event_type") == "file_copy"]
+        lines.append("Assessment of Network, Browser & Web Exfiltration Activity:")
+        if net_evs:
+            lines.append("  - Network connections and/or browser visits are OBSERVED in the evidence.")
+            lines.append(f"  - Supporting Evidence IDs: {[e.get('id') for e in net_evs[:6] if e.get('id')]}")
+            if copies:
+                lines.append("  - Staging and file copy events are OBSERVED; network transmission represents a SUPPORTED HYPOTHESIS.")
+            else:
+                lines.append("  - T1567 web-service exfiltration: HYPOTHESIZED (Insufficient Evidence).")
+                lines.append("  - Reason: Network/browser activity is observed, but data exfiltration is not established.")
+        else:
+            lines.append("  - No network or browser events are recorded in the ingested evidence.")
+        lines.append("")
+        lines.append("Evidentiary State Breakdown:")
+        lines.append("  - Network/browser activity: OBSERVED" if net_evs else "  - Network/browser activity: NOT ESTABLISHED")
+        lines.append("  - Confidential-file copying: OBSERVED" if copies else "  - Confidential-file copying: NOT ESTABLISHED")
+        lines.append("  - Exfiltration: SUPPORTED HYPOTHESIS" if (net_evs and copies) else "  - Exfiltration: NOT ESTABLISHED")
+        lines.append("")
+        lines.append("Conclusion: Network activity is observed; data exfiltration is not established unless supported by file-copy and transmission evidence.")
         lines.append("")
         lines.append("General forensic knowledge is interpretive only and cannot be used as case evidence.")
         lines.append("AI is an investigative assistant, not an evidence source.")
@@ -561,24 +715,6 @@ def answer_question(question: str, rag: dict, events: list[dict], inv: dict) -> 
             lines.append("  - No user authentication events are present in the currently ingested evidence.")
         lines.append("")
         lines.append("Conclusion: Valid-account logon is observed; unauthorized access itself is not established.")
-        lines.append("")
-        lines.append("General forensic knowledge is interpretive only and cannot be used as case evidence.")
-        lines.append("AI is an investigative assistant, not an evidence source.")
-        return "\n".join(lines)
-
-    # Network / Browser / Chrome / Endpoint Query
-    if any(k in q for k in ("network", "browser", "chrome", "10.0.0", "endpoint", "url", "drive", "t1567", "connection")):
-        net_evs = [e for e in events if e.get("source_type") in {"network", "browser"}]
-        lines.append("Assessment of Network & Browser Activity:")
-        if net_evs:
-            lines.append("  - Network connections and/or browser visits are OBSERVED in the evidence.")
-            lines.append(f"  - Supporting Evidence IDs: {[e.get('id') for e in net_evs[:6] if e.get('id')]}")
-            lines.append("  - T1567 web-service exfiltration: HYPOTHESIZED (Insufficient Evidence).")
-            lines.append("  - Reason: Network/browser activity is observed, but data exfiltration is not established.")
-        else:
-            lines.append("  - No network or browser events are recorded in the ingested evidence.")
-        lines.append("")
-        lines.append("Conclusion: Network activity is observed; data exfiltration is not established.")
         lines.append("")
         lines.append("General forensic knowledge is interpretive only and cannot be used as case evidence.")
         lines.append("AI is an investigative assistant, not an evidence source.")

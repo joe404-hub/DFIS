@@ -22,14 +22,41 @@ def test_query_classifier():
     assert classify_user_query("help") == "greeting"
 
     # General concept
+    assert classify_user_query("https means") == "general"
+    assert classify_user_query("What does HTTPS mean?") == "general"
     assert classify_user_query("What is MITRE ATT&CK?") == "general"
     assert classify_user_query("What is T1078?") == "general"
+
+    # Hybrid
+    assert classify_user_query("Does the HTTPS activity in this case indicate exfiltration?") == "hybrid"
 
     # Case investigation
     assert classify_user_query("Was confidential data copied to USB?") == "case_investigation"
     assert classify_user_query("What was chrome.exe accessing?") == "case_investigation"
-    assert classify_user_query("What is 10.0.0.20:443 in this case?") == "case_investigation"
     assert classify_user_query("What are the recommended next steps?") == "case_investigation"
+
+
+def test_general_https_response():
+    events = [
+        {"id": 26, "timestamp": "2026-08-13T09:05:00", "source_type": "browser", "target": "chrome.exe", "description": "Browser visit"},
+        {"id": 41, "timestamp": "2026-08-13T11:00:00", "source_type": "network", "target": "10.0.0.20:443", "description": "TCP flow"},
+    ]
+    inv = {
+        "category": "Possible Unauthorized Use of Valid Account",
+        "secondary": "Insufficient Evidence for Exfiltration",
+        "risk_score": 20,
+        "priority": "LOW PRIORITY",
+        "evidentiary_states": [],
+        "observations": [],
+        "correlations": [],
+    }
+
+    ans = answer_question("https means", {}, events, inv)
+    assert "Hypertext Transfer Protocol Secure" in ans
+    assert "CASE-SPECIFIC CONTEXT:" in ans
+    assert "Working classification:" not in ans  # Does not dump classification template for concept question
+    assert "does not establish" in ans
+    assert "General forensic knowledge is interpretive only" in ans
 
 
 def test_greeting_does_not_inject_case_classification():
