@@ -1,10 +1,18 @@
 """Case-specific investigation: correlated briefs → RAG → classification / risk / chain.
 
-Implements 4-tier forensic evidentiary states:
-- OBSERVED: Directly recorded in evidence logs
-- SUPPORTED HYPOTHESIS: Inferred from corroborated multi-source events
-- INSUFFICIENT EVIDENCE: Observed low-level activity that does not establish the broader hypothesis
-- NOT ESTABLISHED: Hypotheses explicitly unconfirmed or unsupported by case events
+Implements:
+- 4-Tier Forensic Evidentiary States (OBSERVED, SUPPORTED HYPOTHESIS, INSUFFICIENT EVIDENCE, NOT ESTABLISHED)
+- Strict Query Classification (separating Greetings / General Forensic Q&A / Case Investigation)
+- Evidence Relevance Verification
+- Eight Forensic Grounding Rules:
+  1. No evidence → don't claim it happened (state NOT ESTABLISHED)
+  2. Hypothesis → explicitly label it hypothesis with confidence & rationale
+  3. General knowledge → never present as case evidence
+  4. Case classification → inherit authoritative case state
+  5. Risk score → inherit authoritative case score
+  6. Case-specific claims → cite exact evidence event IDs
+  7. Correlation IDs → clearly identified as analytical relationships, not evidence artifacts
+  8. Greeting/casual queries → respond politely as assistant without injecting case findings
 """
 
 from __future__ import annotations
@@ -19,6 +27,30 @@ from app.services.actions import format_actions, recommend_actions
 from app.services.knowledge import FORENSIC_KB
 from app.services.rag import retrieve
 from app.services.risk import score_case
+
+GREETING_REGEX = re.compile(
+    r"^(hi|hello|hey|greetings|howdy|good\s+(morning|afternoon|evening|day)|"
+    r"who\s+are\s+you|what\s+can\s+you\s+do|help|what\s+are\s+you|what\s+is\s+this|"
+    r"thanks|thank\s+you|ok|okay|bye|goodbye)(\s+(there|assistant|bot|friend|dfis))?[\s.?!]*$",
+    re.I,
+)
+
+
+def classify_user_query(question: str) -> str:
+    """Classify user query into: greeting, general, or case_investigation."""
+    q_stripped = question.strip()
+    if GREETING_REGEX.match(q_stripped):
+        return "greeting"
+
+    q_low = q_stripped.lower()
+    # General forensic knowledge definition query
+    if (
+        (q_low.startswith("what is mitre") or q_low.startswith("what is t1") or q_low.startswith("explain mitre") or q_low.startswith("what is an mft") or q_low.startswith("what is evtx") or q_low.startswith("what is prefetch") or q_low.startswith("what is amcache"))
+        and not any(k in q_low for k in ("this case", "in the case", "our case", "observed", "evidence", "found"))
+    ):
+        return "general"
+
+    return "case_investigation"
 
 
 def format_classification_label(category: str | None, secondary: str | None = "") -> str:
@@ -335,6 +367,30 @@ def get_evidence_observations(events: list[dict]) -> list[dict]:
     return observations
 
 
+def get_suggested_queries(inv: dict) -> list[str]:
+    """Dynamically generate investigative queries targeting actual evidentiary gaps in the case."""
+    queries = []
+    ev_states = {s["finding"]: s["state"] for s in inv.get("evidentiary_states", [])}
+
+    if ev_states.get("User authentication") == "OBSERVED":
+        queries.append("Was the valid account legitimately used?")
+    if ev_states.get("Network/browser activity") == "OBSERVED":
+        queries.append("What activity is associated with chrome.exe or network endpoints?")
+    if ev_states.get("Possible network-based transfer") in {"INSUFFICIENT EVIDENCE", "SUPPORTED HYPOTHESIS"}:
+        queries.append("What is the identity and purpose of internal endpoint 10.0.0.20:443?")
+    if ev_states.get("USB connection") == "NOT ESTABLISHED":
+        queries.append("Is there evidence of USB / removable-media activity?")
+    elif ev_states.get("USB connection") == "OBSERVED":
+        queries.append("Was confidential data copied to the connected USB device?")
+    if ev_states.get("Confidential-file copying") == "NOT ESTABLISHED":
+        queries.append("Is there evidence of confidential-file access or copying?")
+    if (inv.get("observations") or []):
+        queries.append("What does the memory snapshot contribute to the investigation?")
+    queries.append("What are the recommended next steps for verification?")
+
+    return queries[:6]
+
+
 def run_investigation(case_id: int, events: list[dict]) -> dict:
     """Analyze timeline and return correlated briefs, RAG context, and incident classification."""
     groups = group_correlations(events)
@@ -358,7 +414,7 @@ def run_investigation(case_id: int, events: list[dict]) -> dict:
         "Every hypothesis is cross-linked to original evidence IDs."
     )
 
-    return {
+    result = {
         "case_id": case_id,
         "category": cls["category"],
         "secondary": cls["secondary"],
@@ -388,6 +444,8 @@ def run_investigation(case_id: int, events: list[dict]) -> dict:
         ],
         "source_counts": {},
     }
+    result["suggested_queries"] = get_suggested_queries(result)
+    return result
 
 
 def _priority_line(inv: dict) -> str:
@@ -402,22 +460,167 @@ def _priority_line(inv: dict) -> str:
     )
 
 
-def _is_benign(inv: dict) -> bool:
-    cat = (inv.get("category") or "").lower()
-    score = float(inv.get("risk_score") or 0)
+def _greeting_response() -> str:
+    """Natural, professional greeting without injecting case classification conclusions."""
+    return "\n".join(
+        [
+            "Hello. I’m the forensic investigation assistant for this case.",
+            "",
+            "You can ask questions about:",
+            "• suspicious activity",
+            "• user authentication",
+            "• file access/copying",
+            "• USB/removable-media activity",
+            "• network activity",
+            "• possible exfiltration",
+            "• timeline events",
+            "• ATT&CK hypotheses",
+            "• evidence IDs",
+            "• investigation recommendations",
+            "",
+            "For example:",
+            '"Was confidential data copied to a removable device?"',
+            '"Show suspicious activity around 09:00–11:00."',
+            '"What evidence supports the T1078 hypothesis?"',
+        ]
+    )
+
+
+def _general_knowledge_response(question: str, rag: dict) -> str:
+    """Respond to generic forensic definitions/concepts with explicit general-knowledge disclaimer."""
+    know_lines = (rag.get("knowledge") or [])
+    body = "\n".join(f"- {k}" for k in know_lines[:3]) if know_lines else (
+        "Digital forensics principles require establishing direct provenance, cryptographic hashes, "
+        "and independent artifact corroboration before concluding that malicious activity occurred."
+    )
+    return "\n".join(
+        [
+            f"Question: {question}",
+            "",
+            "Forensic Concept Explanation:",
+            body,
+            "",
+            "GENERAL FORENSIC KNOWLEDGE DISCLAIMER:",
+            "This explanation describes general digital forensics principles. "
+            "It is interpretive only and cannot be used as case evidence.",
+        ]
+    )
+
+
+def answer_question(question: str, rag: dict, events: list[dict], inv: dict) -> str:
+    """Route query appropriately and synthesize grounded forensic answers enforcing eight grounding rules."""
+    q_type = classify_user_query(question)
+
+    # 1. Routing: Greeting / Casual queries
+    if q_type == "greeting":
+        return _greeting_response()
+
+    # 2. Routing: General Forensic Concept queries
+    if q_type == "general":
+        return _general_knowledge_response(question, rag)
+
+    # 3. Routing: Case Investigation queries
+    q = question.lower()
+    lines = [
+        f"Question: {question}",
+        "",
+        _priority_line(inv),
+        "",
+    ]
+
+    # Task Recommendations Query
+    if any(k in q for k in ("next step", "next action", "what should", "recommend", "further", "investigate next", "tasks")):
+        actions = inv.get("next_actions") or recommend_actions(events, inv.get("correlations") or [])
+        lines.append("Recommended Next Investigation Actions (Derived from Evidentiary Gaps):")
+        lines.append(format_actions(actions))
+        lines.append("")
+        lines.append("AI is an investigative assistant, not an evidence source. All tasks are examiner verification steps.")
+        return "\n".join(lines)
+
+    # USB / Exfiltration Query
+    if any(k in q for k in ("usb", "removable", "exfil", "copied", "copy", "transfer", "confidential", "sensitive", "staged")):
+        usb_ans = _usb_transfer_answer(inv, events)
+        if usb_ans:
+            lines.append(usb_ans)
+        else:
+            lines.append(_no_usb_answer(inv))
+        lines.append("")
+        lines.append("General forensic knowledge is interpretive only and cannot be used as case evidence.")
+        lines.append("AI is an investigative assistant, not an evidence source.")
+        return "\n".join(lines)
+
+    # Authentication / Logon / T1078 Query
+    if any(k in q for k in ("logon", "login", "auth", "account", "t1078", "user", "analyst", "credential")):
+        logon_evs = [e for e in events if e.get("event_type") in {"logon", "admin_logon"} or "4624" in str(e.get("event_id", ""))]
+        lines.append("Assessment of User Authentication & Valid-Account Activity:")
+        if logon_evs:
+            lines.append(f"  - Valid-account authentication is OBSERVED in the evidence (Security Event 4624).")
+            lines.append(f"  - Supporting Evidence IDs: {[e.get('id') for e in logon_evs if e.get('id')]}")
+            lines.append("  - Unauthorized account use: NOT ESTABLISHED. Logon logs prove authentication occurred, not that the account was compromised.")
+        else:
+            lines.append("  - No user authentication events are present in the currently ingested evidence.")
+        lines.append("")
+        lines.append("Conclusion: Valid-account logon is observed; unauthorized access itself is not established.")
+        lines.append("")
+        lines.append("General forensic knowledge is interpretive only and cannot be used as case evidence.")
+        lines.append("AI is an investigative assistant, not an evidence source.")
+        return "\n".join(lines)
+
+    # Network / Browser / Chrome / Endpoint Query
+    if any(k in q for k in ("network", "browser", "chrome", "10.0.0", "endpoint", "url", "drive", "t1567", "connection")):
+        net_evs = [e for e in events if e.get("source_type") in {"network", "browser"}]
+        lines.append("Assessment of Network & Browser Activity:")
+        if net_evs:
+            lines.append("  - Network connections and/or browser visits are OBSERVED in the evidence.")
+            lines.append(f"  - Supporting Evidence IDs: {[e.get('id') for e in net_evs[:6] if e.get('id')]}")
+            lines.append("  - T1567 web-service exfiltration: HYPOTHESIZED (Insufficient Evidence).")
+            lines.append("  - Reason: Network/browser activity is observed, but data exfiltration is not established.")
+        else:
+            lines.append("  - No network or browser events are recorded in the ingested evidence.")
+        lines.append("")
+        lines.append("Conclusion: Network activity is observed; data exfiltration is not established.")
+        lines.append("")
+        lines.append("General forensic knowledge is interpretive only and cannot be used as case evidence.")
+        lines.append("AI is an investigative assistant, not an evidence source.")
+        return "\n".join(lines)
+
+    # Memory Snapshot Query
+    if any(k in q for k in ("memory", "process list", "snapshot", "volatility", "capture time")):
+        mem_obs = inv.get("observations") or []
+        lines.append("Assessment of Memory Acquisition Snapshot:")
+        if mem_obs:
+            o = mem_obs[0]
+            lines.append(f"  - Memory snapshot is an OBSERVED forensic acquisition event (Time: {o.get('time')}).")
+            lines.append(f"  - Evidence IDs: {o.get('evidence_event_ids')}")
+            lines.append(f"  - Forensic Caveat: {o.get('note')}")
+        else:
+            lines.append("  - No memory snapshot artifacts were ingested for this case.")
+        lines.append("")
+        lines.append("General forensic knowledge is interpretive only and cannot be used as case evidence.")
+        lines.append("AI is an investigative assistant, not an evidence source.")
+        return "\n".join(lines)
+
+    # Default Case Specific Summary
     groups = inv.get("correlations") or []
-    families = {g.get("family") for g in groups}
-    if "file_copy" in families:
-        return False
-    return "insufficient evidence" in (inv.get("secondary") or "").lower() or cat == "normal activity" or score < 25
+    lines.append("CASE-SPECIFIC EVIDENCE SUMMARY:")
+    if groups:
+        for g in groups[:5]:
+            lines.append(f"  - {g['timestamp']} {g['family']} {g['entity']} evidence_ids={g['source_event_ids']}")
+    else:
+        lines.append("  - No multi-source correlated clusters identified in the ingested evidence.")
+
+    lines.append("")
+    lines.append("Evidentiary State Breakdown:")
+    for st in inv.get("evidentiary_states") or []:
+        lines.append(f"  - {st['finding']}: {st['state']} ({st['detail']})")
+
+    lines.append("")
+    lines.append("General forensic knowledge is interpretive only and cannot be used as case evidence.")
+    lines.append("AI is an investigative assistant, not an evidence source.")
+    return "\n".join(lines)
 
 
-def _benign_answer(inv: dict) -> str:
-    score = inv.get("risk_score", 0)
-    pri = inv.get("priority") or (inv.get("risk") or {}).get("priority") or "LOW PRIORITY"
-    cat = inv.get("category") or "Possible Unauthorized Use of Valid Account"
-    sec = inv.get("secondary") or "Insufficient Evidence for Exfiltration"
-
+def _no_usb_answer(inv: dict) -> str:
     return "\n".join(
         [
             "The available case evidence does not establish that confidential data was copied to USB.",
@@ -441,8 +644,6 @@ def _benign_answer(inv: dict) -> str:
             "",
             "Conclusion: USB-based confidential-data transfer is not established by the currently ingested evidence. "
             "Further verification of the original artifacts and device/drive mappings is required if this hypothesis needs to be investigated.",
-            "",
-            "General forensic knowledge is interpretive only and cannot be used as case evidence.",
         ]
     )
 
@@ -529,77 +730,6 @@ def _usb_transfer_answer(inv: dict, events: list[dict]) -> str | None:
             f"Investigation Priority: {score}/100 — {pri}",
         ]
     )
-
-
-def answer_question(question: str, rag: dict, events: list[dict], inv: dict) -> str:
-    q = question.lower()
-    lines = [
-        f"Question: Was confidential data copied to USB?" if "usb" in q or "copied" in q else f"Question: {question}",
-        "",
-        _priority_line(inv),
-        "",
-    ]
-    if _is_benign(inv):
-        lines.append(_benign_answer(inv))
-        lines.append("")
-        if any(k in q for k in ("next step", "next action", "what should", "recommend", "further", "investigate next")):
-            lines.append(
-                "Recommended next step: No USB/transfer verification is indicated. "
-                "If required, confirm SHA-256 hashes of the original artifacts and close the case as routine."
-            )
-            lines.append("")
-            lines.append(format_actions(inv.get("next_actions") or recommend_actions(events, inv.get("correlations") or [])))
-        lines.append("")
-        lines.append("AI is an investigative assistant, not an evidence source.")
-        return "\n".join(lines)
-
-    if any(k in q for k in ("next step", "next action", "what should", "recommend", "further", "investigate next")):
-        actions = inv.get("next_actions") or recommend_actions(events, inv.get("correlations") or [])
-        lines.append(
-            "Recommended next step: Verify the relationship between the removable device "
-            "identified by the USBSTOR artifact and the E:\\Transfer destination. This is necessary "
-            "to determine whether the two sensitive files were actually copied to the connected USB device. "
-            "Next, investigate the DemoUpdater service and review the 09:30 network activity to determine "
-            "whether data was subsequently transferred over the network. Do not treat drive.example.local "
-            "or TLS POST as confirmed exfiltration (T1567 remains a low-confidence hypothesis). "
-            "All findings should be verified against the original artifacts and hashes."
-        )
-        lines.append("")
-        lines.append(format_actions(actions))
-        lines.append("")
-        lines.append("AI is an investigative assistant, not an evidence source.")
-        return "\n".join(lines)
-
-    if any(k in q for k in ("usb", "copied", "copy", "exfil", "transfer", "confidential", "sensitive")):
-        usb_ans = _usb_transfer_answer(inv, events)
-        if usb_ans:
-            lines.append(usb_ans)
-            lines.append("")
-        else:
-            lines.append(_benign_answer(inv))
-            lines.append("")
-    else:
-        groups = inv.get("correlations") or []
-        toks = {t for t in re.findall(r"[a-z0-9._-]{3,}", q)}
-        scored = []
-        for g in groups:
-            blob = (g.get("brief") or "").lower()
-            scored.append((sum(1 for t in toks if t in blob), g))
-        scored.sort(key=lambda x: -x[0])
-        use = [g for s, g in scored if s > 0][:6] or [g for _, g in scored[:5]]
-        lines.append("CASE-SPECIFIC EVIDENCE")
-        for g in use:
-            lines.append(
-                f"- {g['timestamp']} {g['family']} {g['entity']} evidence_ids={g['source_event_ids']}"
-            )
-        lines.append("")
-    lines.append("GENERAL FORENSIC KNOWLEDGE (interpretive only — not CASE events; do not infer absent events such as archive creation):")
-    for k in (inv.get("rag") or {}).get("knowledge") or []:
-        lines.append(f"- {k}")
-        break
-    lines.append("")
-    lines.append("AI is an investigative assistant, not an evidence source. Verify conclusions against the original artifacts and hashes.")
-    return "\n".join(lines)
 
 
 def answer_from_investigation(question: str, events: list[dict], inv: dict, rag: dict | None = None) -> str:

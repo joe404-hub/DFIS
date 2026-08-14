@@ -938,16 +938,20 @@ export default function App() {
                   Grounded Q&A: cross-references general forensic principles against this case’s ingested events.
                 </Typography>
 
-                {/* Suggested Questions */}
+                {/* Dynamic Suggested Queries from Evidentiary Gaps */}
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: "uppercase" }}>
-                  Suggested Investigative Queries:
+                  Suggested Investigative Queries (From Evidentiary Gaps):
                 </Typography>
                 <Stack spacing={0.8} sx={{ mt: 1, mb: 2 }}>
-                  {[
-                    "Was any confidential file copied to USB?",
-                    "What processes and commands executed around logon?",
-                    "What is the recommended next step?",
-                  ].map((sug, i) => (
+                  {((inv?.suggested_queries && inv.suggested_queries.length > 0)
+                    ? inv.suggested_queries
+                    : [
+                        "Was the valid account legitimately used?",
+                        "What activity is associated with chrome.exe or network endpoints?",
+                        "Is there evidence of USB / removable-media activity?",
+                        "What are the recommended next steps for verification?",
+                      ]
+                  ).map((sug, i) => (
                     <Button
                       key={i}
                       size="small"

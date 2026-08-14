@@ -1,15 +1,53 @@
-"""Tests for Forensic Classification, Evidentiary States & Grounded Q&A Consistency."""
+"""Tests for Forensic Classification, Evidentiary States, Query Routing & Grounded Q&A Consistency."""
 
 from datetime import datetime, timedelta
 import pytest
 
 from app.services.investigation import (
     classify_and_score,
+    classify_user_query,
     get_evidentiary_states,
     attack_chain,
     answer_question,
     run_investigation,
 )
+
+
+def test_query_classifier():
+    # Greetings
+    assert classify_user_query("hi") == "greeting"
+    assert classify_user_query("hello") == "greeting"
+    assert classify_user_query("hey there") == "greeting"
+    assert classify_user_query("who are you") == "greeting"
+    assert classify_user_query("help") == "greeting"
+
+    # General concept
+    assert classify_user_query("What is MITRE ATT&CK?") == "general"
+    assert classify_user_query("What is T1078?") == "general"
+
+    # Case investigation
+    assert classify_user_query("Was confidential data copied to USB?") == "case_investigation"
+    assert classify_user_query("What was chrome.exe accessing?") == "case_investigation"
+    assert classify_user_query("What is 10.0.0.20:443 in this case?") == "case_investigation"
+    assert classify_user_query("What are the recommended next steps?") == "case_investigation"
+
+
+def test_greeting_does_not_inject_case_classification():
+    inv = {
+        "category": "Possible Unauthorized Use of Valid Account",
+        "secondary": "Insufficient Evidence for Exfiltration",
+        "risk_score": 20,
+        "priority": "LOW PRIORITY",
+        "evidentiary_states": [],
+        "observations": [],
+        "correlations": [],
+    }
+    ans = answer_question("hi", {}, [], inv)
+    assert "forensic investigation assistant for this case" in ans
+    assert "Working classification:" not in ans
+    assert "Investigation Priority:" not in ans
+    assert "USB-based" not in ans
+    assert "CASE-SPECIFIC EVIDENCE" not in ans
 
 
 def test_benign_case_consistency():
@@ -95,3 +133,8 @@ def test_benign_case_consistency():
     assert "not establish that confidential data was copied to USB" in answer
     assert "NOT ESTABLISHED" in answer
     assert "General forensic knowledge is interpretive only and cannot be used as case evidence" in answer
+
+    # 5. Dynamic Suggested Queries
+    assert len(inv["suggested_queries"]) > 0
+    assert any("valid account" in q.lower() for q in inv["suggested_queries"])
+    assert any("usb" in q.lower() for q in inv["suggested_queries"])
