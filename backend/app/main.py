@@ -133,6 +133,7 @@ def rebuild_analysis(db: Session, case: Case) -> dict[str, Any]:
             Recommendation(
                 case_id=case.id,
                 priority=int(a.get("priority") or 0),
+                question=a.get("question") or "",
                 action=a.get("action") or "",
                 reason=a.get("reason") or "",
                 evidence_ids=",".join(str(i) for i in (a.get("evidence_ids") or [])),
@@ -505,6 +506,7 @@ def list_recommendations(case_id: int, db: Session = Depends(get_db)):
         {
             "id": r.id,
             "priority": r.priority,
+            "question": getattr(r, "question", "") or "",
             "action": r.action,
             "reason": r.reason,
             "evidence_ids": [int(x) for x in r.evidence_ids.split(",") if x],

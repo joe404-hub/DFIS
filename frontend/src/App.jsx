@@ -784,49 +784,72 @@ export default function App() {
                 {/* TAB 4: TASKS & RECOMMENDATIONS */}
                 {tab === 4 && (
                   <Box sx={{ p: 2, maxHeight: 600, overflow: "auto" }}>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Examiner Investigation Tasks</Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 2 }}>
-                      Recommended next steps for verification. AI recommendations are investigative aids, not findings of fact.
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700, color: "#4fc3f7" }}>
+                      Grounded Investigation Recommendations
                     </Typography>
-                    <Stack spacing={1.5}>
-                      {(recs.length ? recs : inv?.next_actions || []).map((a) => (
-                        <Paper key={a.id || a.priority} sx={{ p: 2, bgcolor: "#07131e", border: "1px solid #162b3d" }}>
-                          <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-                            <Box>
-                              <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "#eceff1" }}>
-                                Priority #{a.priority}: {a.action}
-                              </Typography>
-                              <Typography variant="body2" sx={{ color: "#90a4ae", mt: 0.5, fontSize: 13 }}>
-                                Reason: {a.reason}
-                              </Typography>
-                              <Typography variant="caption" sx={{ color: "#81d4fa", fontFamily: "IBM Plex Mono", mt: 0.5, display: "block" }}>
-                                Supporting Evidence IDs: {(a.evidence_ids || []).join(", ") || "Case baseline"}
-                              </Typography>
-                            </Box>
-                            <Stack direction="row" spacing={1} alignItems="center">
-                              <Chip size="small" label={(a.status || "pending_verification").replaceAll("_", " ")} color={a.status === "verified" ? "success" : "default"} />
-                              {a.id && a.status !== "verified" && (
-                                <Button
-                                  size="small"
-                                  variant="contained"
-                                  onClick={async () => {
-                                    await api(`/api/cases/${active}/recommendations/${a.id}`, {
-                                      method: "PATCH",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({ status: "verified" }),
-                                    });
-                                    const next = await api(`/api/cases/${active}/recommendations`).then((x) => x.json());
-                                    setRecs(next);
-                                  }}
-                                >
-                                  Verify
-                                </Button>
-                              )}
-                            </Stack>
-                          </Stack>
-                        </Paper>
-                      ))}
-                    </Stack>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 2 }}>
+                      Examiner verification tasks derived directly from NOT ESTABLISHED and INSUFFICIENT EVIDENCE findings. Recommendations tell the examiner what to verify next without creating new evidence.
+                    </Typography>
+
+                    <TableContainer sx={{ border: "1px solid #162b3d", borderRadius: 1.5, mb: 3 }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow sx={{ "& th": { bgcolor: "#0e2233", color: "#b0bec5", fontSize: 11, fontWeight: 700 } }}>
+                            <TableCell>#</TableCell>
+                            <TableCell>Investigation Question</TableCell>
+                            <TableCell>Action / Task</TableCell>
+                            <TableCell>Why Investigate (Forensic Reason)</TableCell>
+                            <TableCell>Evidence IDs</TableCell>
+                            <TableCell align="right">Status / Verification</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {(recs.length ? recs : inv?.next_actions || []).map((a) => (
+                            <TableRow key={a.id || a.priority} hover sx={{ "& td": { borderColor: "#142433", py: 1, fontSize: 12 } }}>
+                              <TableCell sx={{ fontWeight: 700, color: "#81d4fa" }}>{a.priority}</TableCell>
+                              <TableCell sx={{ fontWeight: 600, color: "#eceff1", maxWidth: 180 }}>
+                                {a.question || a.action}
+                              </TableCell>
+                              <TableCell sx={{ color: "#cfd8dc" }}>{a.action}</TableCell>
+                              <TableCell sx={{ color: "#b0bec5", fontSize: 11, maxWidth: 280 }}>
+                                {a.reason}
+                              </TableCell>
+                              <TableCell sx={{ fontFamily: "IBM Plex Mono", fontSize: 11, color: "#81d4fa", whiteSpace: "nowrap" }}>
+                                {(a.evidence_ids || []).join(", ") || "Case baseline"}
+                              </TableCell>
+                              <TableCell align="right">
+                                <Stack direction="row" spacing={1} justifyContent="flex-end" alignItems="center">
+                                  <Chip
+                                    size="small"
+                                    label={(a.status || "pending_verification").replaceAll("_", " ")}
+                                    color={a.status === "verified" ? "success" : "default"}
+                                    sx={{ height: 18, fontSize: 9, fontWeight: 700 }}
+                                  />
+                                  {a.id && a.status !== "verified" && (
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      onClick={async () => {
+                                        await api(`/api/cases/${active}/recommendations/${a.id}`, {
+                                          method: "PATCH",
+                                          headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({ status: "verified" }),
+                                        });
+                                        const next = await api(`/api/cases/${active}/recommendations`).then((x) => x.json());
+                                        setRecs(next);
+                                      }}
+                                      sx={{ fontSize: 10, py: 0.2, px: 0.8 }}
+                                    >
+                                      Verify
+                                    </Button>
+                                  )}
+                                </Stack>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
                   </Box>
                 )}
 

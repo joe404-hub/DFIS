@@ -109,6 +109,7 @@ class Recommendation(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     case_id: Mapped[int] = mapped_column(ForeignKey("cases.id"))
     priority: Mapped[int] = mapped_column(Integer, default=1)
+    question: Mapped[str] = mapped_column(String(255), default="")
     action: Mapped[str] = mapped_column(String(255))
     reason: Mapped[str] = mapped_column(Text, default="")
     evidence_ids: Mapped[str] = mapped_column(Text, default="")

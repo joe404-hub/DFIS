@@ -153,17 +153,18 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
     story.append(Paragraph("6. Recommended next investigation actions", styles["Heading2"]))
     story.append(
         Paragraph(
-            "These are examiner tasks, not findings of fact. T1567 remains a low-confidence hypothesis.",
+            "Examiner verification tasks derived from evidentiary gaps (NOT ESTABLISHED / INSUFFICIENT EVIDENCE). These are examiner tasks, not findings of fact.",
             styles["Italic"],
         )
     )
-    arows = [["#", "Action", "Reason", "Evidence IDs", "Status"]]
+    arows = [["#", "Investigation Question", "Action / Task", "Why Investigate", "Evidence IDs", "Status"]]
     for a in analysis.get("next_actions") or []:
         arows.append(
             [
                 str(a.get("priority")),
-                (a.get("action") or "")[:36],
-                (a.get("reason") or "")[:55],
+                (a.get("question") or a.get("action") or "")[:28],
+                (a.get("action") or "")[:28],
+                (a.get("reason") or "")[:45],
                 ",".join(str(i) for i in (a.get("evidence_ids") or [])),
                 (a.get("status") or "pending_examiner_verification").replace("_", " "),
             ]
