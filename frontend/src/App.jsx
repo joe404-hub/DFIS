@@ -733,8 +733,13 @@ export default function App() {
                     </Stack>
 
                     {/* Correlated Activities */}
-                    <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Correlated Multi-Source Activities</Typography>
-                    <Stack spacing={1}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1, mt: 2 }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Correlated Multi-Source Activities</Typography>
+                      <Typography variant="caption" sx={{ color: "#ffb74d", fontStyle: "italic" }}>
+                        Correlation links are analytical relationships, not evidence artifacts.
+                      </Typography>
+                    </Stack>
+                    <Stack spacing={1} sx={{ mb: 3 }}>
                       {(inv?.correlations || []).map((g) => (
                         <Paper key={g.correlation_id} sx={{ p: 1.5, bgcolor: "#0e1d2b", border: "1px solid #f57f17" }}>
                           <Typography variant="subtitle2" sx={{ color: "#ffd54f", fontWeight: 700 }}>
@@ -746,6 +751,33 @@ export default function App() {
                         </Paper>
                       ))}
                     </Stack>
+
+                    {/* Evidence Acquisition / Observations */}
+                    {(inv?.observations || []).length > 0 && (
+                      <Box sx={{ mb: 2 }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1, color: "#80deea" }}>
+                          Evidence Acquisition / Observations
+                        </Typography>
+                        <Stack spacing={1}>
+                          {(inv?.observations || []).map((o, idx) => (
+                            <Paper key={idx} sx={{ p: 1.5, bgcolor: "#07131e", border: "1px solid #00838f" }}>
+                              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                <Typography variant="subtitle2" sx={{ fontWeight: 600, color: "#80deea" }}>
+                                  {o.title}
+                                </Typography>
+                                <Chip size="small" label={o.status || "OBSERVED"} color="info" sx={{ height: 20, fontSize: 10, fontWeight: 700 }} />
+                              </Stack>
+                              <Typography variant="caption" sx={{ color: "#90a4ae", display: "block", mt: 0.5 }}>
+                                Time: {o.time} • Evidence IDs: {(o.evidence_event_ids || []).join(", ") || "—"}
+                              </Typography>
+                              <Typography variant="caption" sx={{ display: "block", color: "#b0bec5", mt: 0.5, fontStyle: "italic" }}>
+                                Reason: {o.note}
+                              </Typography>
+                            </Paper>
+                          ))}
+                        </Stack>
+                      </Box>
+                    )}
                   </Box>
                 )}
 

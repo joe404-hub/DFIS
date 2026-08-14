@@ -77,7 +77,7 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
         story.append(_table(rrows))
 
     story.append(Spacer(1, 8))
-    story.append(Paragraph("4. Attack-chain hypothesis (ATT&amp;CK not factual)", styles["Heading2"]))
+    story.append(Paragraph("4. Reconstructed Attack Chain Hypothesis (ATT&amp;CK not factual)", styles["Heading2"]))
     crows = [["Time", "Activity", "Technique", "Status", "Conf.", "Evidence IDs"]]
     for s in analysis.get("attack_chain") or []:
         crows.append(
@@ -95,6 +95,7 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
 
     story.append(Spacer(1, 8))
     story.append(Paragraph("5. Correlated activities → supporting event IDs", styles["Heading2"]))
+    story.append(Paragraph("Correlation links are analytical relationships, not evidence artifacts.", styles["Italic"]))
     grows = [["Time", "Type", "Entity", "Link", "Evidence IDs"]]
     for g in analysis.get("correlations") or []:
         grows.append(
@@ -108,6 +109,25 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
         )
     if len(grows) > 1:
         story.append(_table(grows))
+
+    # 5c. Evidence Acquisition / Observations
+    obs = analysis.get("observations") or []
+    if obs:
+        story.append(Spacer(1, 8))
+        story.append(Paragraph("5c. Evidence Acquisition / Observations", styles["Heading2"]))
+        orows = [["Time", "Observation", "Type", "Status", "Evidence IDs", "Forensic Note"]]
+        for o in obs:
+            orows.append(
+                [
+                    str(o.get("time") or "")[:19],
+                    o.get("title", ""),
+                    o.get("type", "Acquisition"),
+                    o.get("status", "OBSERVED"),
+                    ",".join(str(i) for i in (o.get("evidence_event_ids") or [])),
+                    o.get("note", "")[:60],
+                ]
+            )
+        story.append(_table(orows))
 
     from app.services.investigation import _usb_transfer_answer
 

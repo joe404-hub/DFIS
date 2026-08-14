@@ -75,17 +75,20 @@ def test_benign_case_consistency():
     assert ev_states["Confidential-file copying"] == "NOT ESTABLISHED"
     assert ev_states["Exfiltration"] == "NOT ESTABLISHED"
 
-    # 3. Attack Chain Technique & Memory Mapping
+    # 3. Attack Chain Technique & Evidence Observations Mapping
     chain = inv["attack_chain"]
     # Check T1078 has status observed and high confidence
     t1078_step = next((s for s in chain if s["mitre"] == "T1078"), None)
     assert t1078_step is not None
     assert t1078_step["status"] == "observed"
 
-    # Check Memory snapshot is NOT mapped to T1052
-    mem_step = next((s for s in chain if "Memory snapshot" in s["title"]), None)
-    assert mem_step is not None
-    assert mem_step["mitre"] == "—" or mem_step["mitre"] == ""
+    # Check Memory snapshot is in separate observations section, NOT in attack chain
+    assert not any("Memory snapshot" in s["title"] for s in chain)
+    assert len(inv["observations"]) > 0
+    mem_obs = inv["observations"][0]
+    assert mem_obs["title"] == "Memory snapshot"
+    assert mem_obs["status"] == "OBSERVED"
+    assert "observation time" in mem_obs["note"]
 
     # 4. Grounded Q&A Consistency
     answer = answer_question("Was confidential data copied to USB?", {}, events, inv)

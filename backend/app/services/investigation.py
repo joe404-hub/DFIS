@@ -132,7 +132,7 @@ def get_evidentiary_states(events: list[dict], groups: list[dict]) -> list[dict[
     if has_net and (has_copies or has_sensitive):
         states.append({"finding": "Possible network-based transfer", "state": "SUPPORTED HYPOTHESIS", "detail": "Network session observed following sensitive file access/copy."})
     elif has_net:
-        states.append({"finding": "Possible network-based transfer", "state": "INSUFFICIENT EVIDENCE", "detail": "Network activity is observed, but data exfiltration is not established."})
+        states.append({"finding": "Possible network-based transfer", "state": "INSUFFICIENT EVIDENCE", "detail": "T1567 is a hypothesis based on network/browser activity; exfiltration is not established."})
     else:
         states.append({"finding": "Possible network-based transfer", "state": "NOT ESTABLISHED", "detail": "No network transfer activity found."})
 
@@ -234,7 +234,7 @@ def _tech(tid, name, status, confidence, stage):
 
 
 def attack_chain(events: list[dict], groups: list[dict]) -> list[dict]:
-    """Ordered hypothesis steps, each linked to raw event IDs with clear uncertainty labels."""
+    """Ordered hypothesis attack stages, each linked to raw event IDs with clear uncertainty labels."""
     steps = []
 
     def add(time, title, mitre, ids, note, status="hypothesized", confidence="medium"):
@@ -250,7 +250,7 @@ def attack_chain(events: list[dict], groups: list[dict]) -> list[dict]:
             }
         )
 
-    timed = [e for e in events if e.get("timestamp") and e.get("source_type") != "correlated"]
+    timed = [e for e in events if e.get("timestamp") and e.get("source_type") not in {"correlated", "memory"}]
     logons = [e for e in timed if e.get("event_type") in {"logon", "admin_logon"}]
     if logons:
         add(
@@ -258,7 +258,7 @@ def attack_chain(events: list[dict], groups: list[dict]) -> list[dict]:
             "User authentication / valid-account activity",
             "T1078",
             [logons[0].get("id")],
-            "Observed valid-account authentication; unauthorized access is not established",
+            "Observed valid-account authentication; unauthorized access is not established.",
             status="observed",
             confidence="high",
         )
@@ -285,7 +285,7 @@ def attack_chain(events: list[dict], groups: list[dict]) -> list[dict]:
                 f"Internal network / drive activity ({g['entity']})" if is_internal else f"Network connection ({g['entity']})",
                 "T1567" if not is_internal else "—",
                 g["source_event_ids"],
-                "Network activity is observed, but data exfiltration is not established" if not is_internal else "Network/browser activity to internal endpoint; does not establish external data exfiltration",
+                "T1567 is a hypothesis based on network/browser activity; exfiltration is not established." if not is_internal else "Network/browser activity to internal endpoint; does not establish external data exfiltration.",
                 status="hypothesized" if not is_internal else "insufficient_evidence",
                 confidence="medium" if not is_internal else "low",
             )
@@ -299,23 +299,10 @@ def attack_chain(events: list[dict], groups: list[dict]) -> list[dict]:
                 "Network/browser activity" + (" (web-exfil hypothesis)" if suspicious else ""),
                 "T1567" if suspicious else "—",
                 [e.get("id") for e in net[:4]],
-                "Network activity is observed, but data exfiltration is not established",
+                "T1567 is a hypothesis based on network/browser activity; exfiltration is not established.",
                 status="hypothesized" if suspicious else "insufficient_evidence",
                 confidence="medium" if suspicious else "low",
             )
-
-    # Memory observation
-    mem = [e for e in events if e.get("source_type") == "memory"]
-    if mem:
-        add(
-            mem[0].get("observation_time") or mem[0].get("timestamp"),
-            "Memory snapshot (observation time, not process start)",
-            "—",
-            [e.get("id") for e in mem],
-            "Memory acquisition snapshot; timestamp is observation time, not process execution start",
-            status="observed",
-            confidence="observation",
-        )
 
     # Deduplicate steps by title & time
     seen = set()
@@ -328,11 +315,32 @@ def attack_chain(events: list[dict], groups: list[dict]) -> list[dict]:
     return uniq
 
 
+def get_evidence_observations(events: list[dict]) -> list[dict]:
+    """Extract forensic acquisition snapshots (e.g. Memory snapshot, Disk acquisition) separated from attack chain."""
+    observations = []
+    mem_events = [e for e in events if e.get("source_type") == "memory"]
+    if mem_events:
+        obs_time = mem_events[0].get("observation_time") or mem_events[0].get("timestamp")
+        observations.append(
+            {
+                "title": "Memory snapshot",
+                "type": "Memory Acquisition",
+                "time": str(obs_time or "Capture time"),
+                "status": "OBSERVED",
+                "confidence": "HIGH (OBSERVATION)",
+                "evidence_event_ids": [e.get("id") for e in mem_events if e.get("id") is not None],
+                "note": "Memory acquisition snapshot; timestamp is observation time, not process execution start.",
+            }
+        )
+    return observations
+
+
 def run_investigation(case_id: int, events: list[dict]) -> dict:
     """Analyze timeline and return correlated briefs, RAG context, and incident classification."""
     groups = group_correlations(events)
     cls = classify_and_score(events, groups)
     chain = attack_chain(events, groups)
+    obs = get_evidence_observations(events)
     rag = retrieve(case_id, "data exfiltration USB copy sensitive archive")
     actions = recommend_actions(events, groups)
 
@@ -362,6 +370,7 @@ def run_investigation(case_id: int, events: list[dict]) -> dict:
         "risk": cls["risk"],
         "correlations": groups,
         "attack_chain": chain,
+        "observations": obs,
         "next_actions": actions,
         "evidentiary_states": cls.get("evidentiary_states", []),
         "rag": rag,
