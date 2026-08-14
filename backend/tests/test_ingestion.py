@@ -25,8 +25,8 @@ def setup_db():
     yield
 
 
-def test_full_pipeline_ingestion(tmp_path):
-    db = SessionLocal()
+def test_full_pipeline_ingestion(tmp_path, db_session):
+    db = db_session
     try:
         case_num = f"CASE-TEST-{uuid.uuid4().hex[:8]}"
         # Create Case

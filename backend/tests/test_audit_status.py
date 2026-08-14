@@ -19,7 +19,7 @@ def setup_db():
     yield
 
 
-def test_sqlite_diagnostics_and_empty_status(tmp_path):
+def test_sqlite_diagnostics_and_empty_status(tmp_path, db_session):
     # Create empty SQLite history database
     db_path = tmp_path / "History.sqlite"
     con = sqlite3.connect(db_path)
@@ -35,7 +35,7 @@ def test_sqlite_diagnostics_and_empty_status(tmp_path):
     assert diag["row_counts"]["urls"] == 0
 
     # Test full Ingestion Engine handling of empty SQLite database
-    db = SessionLocal()
+    db = db_session
     try:
         case = Case(
             case_number=f"CASE-AUDIT-{uuid.uuid4().hex[:6].upper()}",

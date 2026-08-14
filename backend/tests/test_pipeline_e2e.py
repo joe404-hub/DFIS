@@ -28,8 +28,8 @@ def init_db():
     yield
 
 
-def test_complete_investigation_workflow(tmp_path):
-    db = SessionLocal()
+def test_complete_investigation_workflow(tmp_path, db_session):
+    db = db_session
     try:
         case_id_str = f"CASE-{uuid.uuid4().hex[:6].upper()}"
         case = Case(
