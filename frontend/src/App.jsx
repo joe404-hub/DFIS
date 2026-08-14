@@ -76,7 +76,7 @@ export default function App() {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [form, setForm] = useState({
     case_number: "CASE-002",
-    title: "Insider Data Exfiltration Investigation",
+    title: "Potential Insider Activity Investigation",
     investigator: "Forensic Examiner",
     description: "Automated artifact extraction from case evidence package.",
   });
@@ -342,7 +342,7 @@ export default function App() {
                 <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
                   <Chip size="small" icon={<FingerprintIcon />} label={`Case: ${detail.case_number}`} sx={{ bgcolor: "#102a3d", color: "#81d4fa" }} />
                   <Chip size="small" label={`Examiner: ${detail.investigator}`} variant="outlined" sx={{ borderColor: "#28455e" }} />
-                  {finding && <Chip size="small" color="secondary" label={`Hypothesis: ${finding.category}`} sx={{ fontWeight: 600 }} />}
+                  {finding && <Chip size="small" color="secondary" label={`Hypothesis: ${formatClassification(finding.category)}`} sx={{ fontWeight: 600 }} />}
                   {finding?.mitre_ids && <Chip size="small" label={`ATT&CK: ${finding.mitre_ids}`} sx={{ bgcolor: "#1e1e24", color: "#ffb74d" }} />}
                 </Stack>
               </Paper>
@@ -655,7 +655,7 @@ export default function App() {
                 {tab === 3 && (
                   <Box sx={{ p: 2, maxHeight: 600, overflow: "auto" }}>
                     <Typography variant="subtitle1" sx={{ fontWeight: 700, color: "#4fc3f7" }}>
-                      Incident Classification: Possible {inv?.category || finding?.category} / {inv?.secondary || "Under Examination"}
+                      Incident Classification: {formatClassification(inv?.category || finding?.category, inv?.secondary)}
                     </Typography>
                     <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 2 }}>
                       ATT&CK techniques and attack-chain stages are investigative hypotheses synthesized from multi-source correlations.
@@ -710,14 +710,22 @@ export default function App() {
                             <Typography variant="subtitle2" sx={{ fontWeight: 600, color: "#81d4fa" }}>
                               {s.title}
                             </Typography>
-                            <Chip size="small" label={s.mitre || "—"} color={s.status === "observed" ? "success" : "secondary"} sx={{ height: 20, fontSize: 10 }} />
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <Chip size="small" label={s.mitre || "—"} color="secondary" sx={{ height: 20, fontSize: 10 }} />
+                              <Chip
+                                size="small"
+                                label={s.status?.toUpperCase() || "HYPOTHESIZED"}
+                                color={s.status === "observed" ? "success" : s.status === "insufficient_evidence" ? "warning" : "default"}
+                                sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
+                              />
+                            </Stack>
                           </Stack>
-                          <Typography variant="caption" sx={{ color: "#90a4ae" }}>
-                            Time: {s.time} • Status: <b>{s.status}</b> ({s.confidence}) • Linked Evidence IDs: {(s.evidence_event_ids || []).join(", ") || "—"}
+                          <Typography variant="caption" sx={{ color: "#90a4ae", display: "block", mt: 0.5 }}>
+                            Time: {s.time} • Confidence: <b>{s.confidence?.toUpperCase() || "MEDIUM"}</b> • Evidence IDs: {(s.evidence_event_ids || []).join(", ") || "—"}
                           </Typography>
                           {s.note && (
-                            <Typography variant="caption" sx={{ display: "block", color: "#b0bec5", mt: 0.5 }}>
-                              {s.note}
+                            <Typography variant="caption" sx={{ display: "block", color: "#b0bec5", mt: 0.5, fontStyle: "italic" }}>
+                              Reason: {s.note}
                             </Typography>
                           )}
                         </Paper>
@@ -1043,4 +1051,13 @@ function sourceColor(src) {
     case "correlated": return "#fbc02d";
     default: return "#546e7a";
   }
+}
+
+function formatClassification(cat, sec) {
+  if (!cat) return "Under Examination";
+  let c = String(cat).trim();
+  if (!c.toLowerCase().startsWith("possible ") && c.toLowerCase() !== "normal activity" && c.toLowerCase() !== "routine operations") {
+    c = `Possible ${c}`;
+  }
+  return sec ? `${c} / ${sec}` : c;
 }

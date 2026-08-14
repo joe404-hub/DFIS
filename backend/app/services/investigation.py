@@ -21,6 +21,14 @@ from app.services.rag import retrieve
 from app.services.risk import score_case
 
 
+def format_classification_label(category: str | None, secondary: str | None = "") -> str:
+    """Format incident classification string without duplicating the 'Possible' prefix."""
+    cat = (category or "Normal Activity").strip()
+    if not cat.lower().startswith("possible ") and cat.lower() not in {"normal activity", "routine operations"}:
+        cat = f"Possible {cat}"
+    return f"{cat} / {secondary}" if secondary else cat
+
+
 def group_correlations(events: list[dict]) -> list[dict]:
     """Correlation IDs link raw evidence; CORRELATED_ACTIVITY is analysis only."""
     by_cid: dict[str, list[dict]] = defaultdict(list)
@@ -124,7 +132,7 @@ def get_evidentiary_states(events: list[dict], groups: list[dict]) -> list[dict[
     if has_net and (has_copies or has_sensitive):
         states.append({"finding": "Possible network-based transfer", "state": "SUPPORTED HYPOTHESIS", "detail": "Network session observed following sensitive file access/copy."})
     elif has_net:
-        states.append({"finding": "Possible network-based transfer", "state": "INSUFFICIENT EVIDENCE", "detail": "Network activity observed, but no confirmed data exfiltration."})
+        states.append({"finding": "Possible network-based transfer", "state": "INSUFFICIENT EVIDENCE", "detail": "Network activity is observed, but data exfiltration is not established."})
     else:
         states.append({"finding": "Possible network-based transfer", "state": "NOT ESTABLISHED", "detail": "No network transfer activity found."})
 
@@ -203,7 +211,7 @@ def classify_and_score(events: list[dict], groups: list[dict]) -> dict:
     elif network and (copies or usb or sensitive):
         techniques.append(_tech("T1567", "Exfil over web service", "hypothesized", "low", "exfiltration"))
     elif network:
-        techniques.append(_tech("T1567 (Hypothesized)", "Internal drive / network session", "insufficient_evidence", "low", "network"))
+        techniques.append(_tech("T1567", "Internal drive / network session", "hypothesized", "medium", "network"))
 
     stages = [t["stage"] for t in techniques]
     evidentiary_states = get_evidentiary_states(events, groups)
@@ -271,16 +279,15 @@ def attack_chain(events: list[dict], groups: list[dict]) -> list[dict]:
         if g["family"] == "usb_remove":
             add(g["timestamp"], "Removable media removed", "T1052", g["source_event_ids"], "", status="observed", confidence="high")
         if g["family"] == "network":
-            # Check if internal IP
             is_internal = "10." in g["entity"] or "192.168." in g["entity"] or "172." in g["entity"] or ".local" in g["entity"] or ".corp" in g["entity"]
             add(
                 g["timestamp"],
                 f"Internal network / drive activity ({g['entity']})" if is_internal else f"Network connection ({g['entity']})",
-                "T1567 (Hypothesized)" if not is_internal else "—",
+                "T1567" if not is_internal else "—",
                 g["source_event_ids"],
-                "Network/browser activity to internal endpoint; does not establish external data exfiltration",
-                status="insufficient_evidence",
-                confidence="low",
+                "Network activity is observed, but data exfiltration is not established" if not is_internal else "Network/browser activity to internal endpoint; does not establish external data exfiltration",
+                status="hypothesized" if not is_internal else "insufficient_evidence",
+                confidence="medium" if not is_internal else "low",
             )
 
     if not any("Network" in s["title"] or "Internal network" in s["title"] for s in steps):
@@ -290,11 +297,11 @@ def attack_chain(events: list[dict], groups: list[dict]) -> list[dict]:
             add(
                 net[0].get("timestamp"),
                 "Network/browser activity" + (" (web-exfil hypothesis)" if suspicious else ""),
-                "T1567 (Hypothesized)" if suspicious else "—",
+                "T1567" if suspicious else "—",
                 [e.get("id") for e in net[:4]],
-                "Network/browser activity consistent with possible web-service or network transfer, but no confirmed exfiltration",
-                status="insufficient_evidence",
-                confidence="low",
+                "Network activity is observed, but data exfiltration is not established",
+                status="hypothesized" if suspicious else "insufficient_evidence",
+                confidence="medium" if suspicious else "low",
             )
 
     # Memory observation
@@ -335,8 +342,9 @@ def run_investigation(case_id: int, events: list[dict]) -> dict:
     if not evidence_ids:
         evidence_ids = [e.get("id") for e in events if e.get("id") is not None][:10]
 
+    formatted_label = format_classification_label(cls["category"], cls["secondary"])
     body = (
-        f"Working classification: Possible {cls['category']} / {cls['secondary']}. "
+        f"Working classification: {formatted_label}. "
         f"Investigation Priority: {cls['risk_score']}/100 ({cls['risk'].get('priority')}). "
         "Malicious intent and unauthorized access cannot be established from logs alone. "
         "Every hypothesis is cross-linked to original evidence IDs."
@@ -360,7 +368,7 @@ def run_investigation(case_id: int, events: list[dict]) -> dict:
         "findings": [
             {
                 "category": cls["category"],
-                "title": f"Possible {cls['category']} / {cls['secondary']}",
+                "title": formatted_label,
                 "body": body,
                 "risk_score": float(cls["risk_score"]),
                 "confidence": cls["confidence"],
@@ -378,8 +386,9 @@ def _priority_line(inv: dict) -> str:
     pri = inv.get("priority") or (inv.get("risk") or {}).get("priority") or "PRIORITY"
     cat = inv.get("category") or "Normal Activity"
     sec = inv.get("secondary") or "Insufficient suspicious indicators"
+    formatted_label = format_classification_label(cat, sec)
     return (
-        f"Working classification: Possible {cat} / {sec}\n"
+        f"Working classification: {formatted_label}\n"
         f"Investigation Priority: {score}/100 — {pri}"
     )
 

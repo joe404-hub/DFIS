@@ -34,9 +34,13 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
 
     story.append(Spacer(1, 10))
     story.append(Paragraph("2. Incident classification & Evidentiary States", styles["Heading2"]))
+    
+    from app.services.investigation import format_classification_label
+    formatted_label = format_classification_label(analysis.get("category"), analysis.get("secondary"))
+
     story.append(
         Paragraph(
-            f"Working Classification: <b>Possible {analysis.get('category')}</b> / {analysis.get('secondary') or ''} "
+            f"Working Classification: <b>{formatted_label}</b> "
             f"&nbsp; Investigation Priority: {analysis.get('risk_score')}/100 — "
             f"{(analysis.get('risk') or {}).get('priority') or analysis.get('priority') or 'PRIORITY'} "
             f"(prioritization aid, not legal culpability)",

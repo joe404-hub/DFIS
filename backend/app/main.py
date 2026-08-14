@@ -579,7 +579,9 @@ def report_json(case_id: int, db: Session = Depends(get_db)):
     c = _case_or_404(db, case_id)
     arts = db.query(Artifact).filter(Artifact.case_id == case_id).order_by(Artifact.timestamp.asc()).all()
     analysis = analyze_timeline([_art_to_dict(a) for a in arts], case_id=c.id)
-    from app.services.investigation import _usb_transfer_answer
+    from app.services.investigation import _usb_transfer_answer, format_classification_label
+
+    formatted_label = format_classification_label(analysis.get("category"), analysis.get("secondary"))
 
     return {
         "case": {
@@ -597,7 +599,7 @@ def report_json(case_id: int, db: Session = Depends(get_db)):
             for e in c.evidence
         ],
         "classification": {
-            "label": f"Possible {analysis.get('category')} / {analysis.get('secondary')}",
+            "label": formatted_label,
             "priority": analysis.get("priority"),
             "risk_score": analysis.get("risk_score"),
             "disclaimer": (analysis.get("risk") or {}).get("disclaimer"),
