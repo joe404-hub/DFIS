@@ -5,6 +5,14 @@ Archive Ingestion → SHA-256 Integrity → Content-Based File Type Detection �
 Specialized Artifact Parsing → Common Forensic Schema Normalization →
 Timestamp Normalization → Deduplication → Event Correlation → Database Persistence →
 Case RAG Vector Indexing → AI Classification & Risk Analysis.
+
+Provides auditable, first-class parser status tracking:
+- parsed: Successfully extracted relevant forensic events
+- empty: Recognized artifact structure inspected, but no relevant records present
+- needs_review / unsupported: Recognized artifact type, but extraction needs examiner review
+- error: Parser encountered an exception
+- excluded: Intentionally excluded non-evidence documentation / ground truth
+- skipped: Processing deliberately bypassed (e.g. zero-byte file)
 """
 
 from __future__ import annotations
@@ -24,6 +32,7 @@ from app.models import Artifact, Case, CustodyEvent, Evidence
 from app.services.detector import DetectionResult, detect_file_type
 from app.services.integrity import sha256_file
 from app.services.parsers import classify_skipped, parse_file
+from app.services.parsers.browser_parser import parse_with_diagnostics
 from app.services.timeline import build_timeline, fingerprint
 
 
@@ -37,8 +46,11 @@ class IngestedFileReport:
     canonical_source: str
     subtype: str
     magic_signature: str
+    parser_name: str
     events_extracted: int
-    status: str  # parsed, skipped, error
+    status: str  # parsed, empty, needs_review, unsupported, error, excluded, skipped
+    reason: str = ""
+    recommended_action: str = ""
     notes: str = ""
 
 
@@ -49,13 +61,26 @@ class IngestionSummary:
     archive_name: str
     archive_sha256: str
     total_files_discovered: int
-    total_files_parsed: int
-    total_files_skipped: int
+    total_documentation_excluded: int
+    total_artifacts_identified: int
+    total_successfully_parsed: int
+    total_empty_artifacts: int
+    total_parser_errors: int
+    total_unsupported: int
     total_events_extracted: int
     total_events_deduplicated: int
     total_correlated_groups: int
     files: list[IngestedFileReport] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     skipped_reasons: list[str] = field(default_factory=list)
+
+    @property
+    def total_files_parsed(self) -> int:
+        return self.total_successfully_parsed
+
+    @property
+    def total_files_skipped(self) -> int:
+        return self.total_documentation_excluded + self.total_empty_artifacts + self.total_unsupported
 
 
 class EvidenceIngestionEngine:
@@ -71,7 +96,7 @@ class EvidenceIngestionEngine:
         original_filename: str,
         notes: str = "",
     ) -> tuple[Evidence, IngestionSummary]:
-        """Process an uploaded evidence file (container ZIP/archive or raw artifact)."""
+        """Process an uploaded evidence package with full content inspection and auditable status logging."""
         file_path = Path(file_path)
         archive_digest = sha256_file(file_path)
         archive_size = file_path.stat().st_size
@@ -113,7 +138,6 @@ class EvidenceIngestionEngine:
             extract_dir.mkdir(exist_ok=True)
             try:
                 with zipfile.ZipFile(file_path) as zf:
-                    # Guard against zip slip
                     for member in zf.infolist():
                         target_p = extract_dir / member.filename
                         if not target_p.resolve().is_relative_to(extract_dir.resolve()):
@@ -140,13 +164,37 @@ class EvidenceIngestionEngine:
         raw_events: list[dict[str, Any]] = []
         file_reports: list[IngestedFileReport] = []
         skipped_details: list[str] = []
+        warnings: list[str] = []
 
         # Process each discovered file
         for fp, rel_name in work_files:
             file_digest = sha256_file(fp)
             fsize = fp.stat().st_size
 
-            # Check if file should be excluded from forensic timeline (documentation, evaluation truth)
+            # Check zero-byte file
+            if fsize == 0:
+                file_reports.append(
+                    IngestedFileReport(
+                        filename=fp.name,
+                        relative_path=rel_name,
+                        sha256=file_digest,
+                        size_bytes=0,
+                        detected_type="empty_file",
+                        canonical_source="unknown",
+                        subtype="zero_byte",
+                        magic_signature="Empty (0 bytes)",
+                        parser_name="None",
+                        events_extracted=0,
+                        status="skipped",
+                        reason="Zero-byte file",
+                        recommended_action="Verify if file was acquired correctly",
+                        notes="File is 0 bytes",
+                    )
+                )
+                skipped_details.append(f"{rel_name} (zero bytes)")
+                continue
+
+            # Check if file should be excluded from forensic timeline (documentation, evaluation ground truth)
             skip_reason = classify_skipped(fp)
             if skip_reason:
                 skipped_details.append(f"{rel_name} ({skip_reason})")
@@ -160,9 +208,12 @@ class EvidenceIngestionEngine:
                         canonical_source="metadata",
                         subtype=skip_reason,
                         magic_signature="Filtered Documentation / Ground Truth",
+                        parser_name="None",
                         events_extracted=0,
-                        status="skipped",
-                        notes=f"Excluded from timeline: {skip_reason}",
+                        status="excluded",
+                        reason=f"Excluded from timeline: {skip_reason}",
+                        recommended_action="None (Non-evidence file)",
+                        notes="Intentionally excluded documentation or evaluation baseline",
                     )
                 )
                 continue
@@ -170,35 +221,55 @@ class EvidenceIngestionEngine:
             # Automatic File Type Detection by magic bytes and structure
             detection = detect_file_type(fp)
 
-            # Parse with specialized artifact parser
-            parsed = parse_file(fp, detection=detection)
-
-            if not parsed:
-                skipped_details.append(f"{rel_name} (no forensic events extracted)")
-                file_reports.append(
-                    IngestedFileReport(
-                        filename=fp.name,
-                        relative_path=rel_name,
-                        sha256=file_digest,
-                        size_bytes=fsize,
-                        detected_type=detection.artifact_type,
-                        canonical_source=detection.canonical_source_type,
-                        subtype=detection.subtype,
-                        magic_signature=detection.magic_signature,
-                        events_extracted=0,
-                        status="skipped",
-                        notes="No forensic events extracted",
+            # Specialized execution and diagnostics for SQLite browser databases
+            if detection.artifact_type == "browser_sqlite":
+                parsed, diag = parse_with_diagnostics(fp)
+                parser_name = "SQLite Browser Parser"
+                if parsed:
+                    status = "parsed"
+                    reason = f"Successfully parsed {len(parsed)} browser events from tables: {', '.join(diag.get('tables', []))}"
+                    rec_action = "Review extracted URL visits and downloads"
+                else:
+                    status = "empty" if diag.get("tables") else "needs_review"
+                    reason = f"SQLite database inspected (tables: {', '.join(diag.get('tables', [])) or 'none'}). Expected browser history/download queries returned 0 records."
+                    rec_action = "Inspect database schema and table rows"
+                    warnings.append(
+                        f"⚠️ Browser History database identified ({rel_name}) but no events were extracted. "
+                        f"Reason: {reason} Recommended action: {rec_action}."
                     )
-                )
-                continue
+            else:
+                # Other specialized parsers
+                parser_name = self._parser_display_name(detection.artifact_type)
+                try:
+                    parsed = parse_file(fp, detection=detection)
+                    if parsed:
+                        status = "parsed"
+                        reason = f"Extracted {len(parsed)} forensic events"
+                        rec_action = "Correlate with timeline"
+                    elif detection.artifact_type in {"evtx", "registry_hive", "pcap", "memory", "csv_tabular"}:
+                        status = "empty"
+                        reason = f"Recognized {detection.description} artifact, but 0 relevant forensic records found"
+                        rec_action = "Inspect artifact structure"
+                        warnings.append(f"⚠️ Artifact {rel_name} ({detection.description}) inspected but 0 events were extracted.")
+                    else:
+                        status = "unsupported"
+                        reason = f"Unrecognized or unsupported artifact format ({detection.description})"
+                        rec_action = "Check if custom parser is required"
+                except Exception as exc:
+                    parsed = []
+                    status = "error"
+                    reason = f"Parser exception: {exc}"
+                    rec_action = "Inspect error logs and file corruption"
+                    warnings.append(f"❌ Error parsing {rel_name}: {exc}")
 
             # Populate Common Forensic Schema fields
-            for rec in parsed:
-                rec["evidence_id"] = ev.id
-                rec["evidence_hash"] = file_digest
-                rec["source_file"] = rel_name
-                rec["fingerprint"] = fingerprint(rec)
-                raw_events.append(rec)
+            if parsed:
+                for rec in parsed:
+                    rec["evidence_id"] = ev.id
+                    rec["evidence_hash"] = file_digest
+                    rec["source_file"] = rel_name
+                    rec["fingerprint"] = fingerprint(rec)
+                    raw_events.append(rec)
 
             file_reports.append(
                 IngestedFileReport(
@@ -210,13 +281,26 @@ class EvidenceIngestionEngine:
                     canonical_source=detection.canonical_source_type,
                     subtype=detection.subtype,
                     magic_signature=detection.magic_signature,
+                    parser_name=parser_name,
                     events_extracted=len(parsed),
-                    status="parsed",
+                    status=status,
+                    reason=reason,
+                    recommended_action=rec_action,
                     notes=f"Detected: {detection.description}",
                 )
             )
 
-        # Log custody for skipped files if any
+        # Log custody event for excluded/warning items
+        if warnings:
+            self.db.add(
+                CustodyEvent(
+                    case_id=self.case.id,
+                    evidence_id=ev.id,
+                    action="ingestion_warnings",
+                    actor="Evidence Ingestion Engine",
+                    detail="; ".join(warnings[:10]),
+                )
+            )
         if skipped_details:
             self.db.add(
                 CustodyEvent(
@@ -240,8 +324,14 @@ class EvidenceIngestionEngine:
         self.db.commit()
         self.db.refresh(ev)
 
-        # Count correlated groups
+        # Count metrics
         corr_count = sum(1 for e in timeline_events if e.get("source_type") == "correlated")
+        doc_excluded_count = sum(1 for f in file_reports if f.status == "excluded")
+        identified_count = sum(1 for f in file_reports if f.status not in {"excluded", "skipped"})
+        parsed_count = sum(1 for f in file_reports if f.status == "parsed")
+        empty_count = sum(1 for f in file_reports if f.status == "empty")
+        error_count = sum(1 for f in file_reports if f.status == "error")
+        unsupported_count = sum(1 for f in file_reports if f.status in {"unsupported", "needs_review"})
 
         summary = IngestionSummary(
             case_id=self.case.id,
@@ -249,16 +339,35 @@ class EvidenceIngestionEngine:
             archive_name=original_filename,
             archive_sha256=archive_digest,
             total_files_discovered=len(work_files),
-            total_files_parsed=sum(1 for f in file_reports if f.status == "parsed"),
-            total_files_skipped=sum(1 for f in file_reports if f.status == "skipped"),
+            total_documentation_excluded=doc_excluded_count,
+            total_artifacts_identified=identified_count,
+            total_successfully_parsed=parsed_count,
+            total_empty_artifacts=empty_count,
+            total_parser_errors=error_count,
+            total_unsupported=unsupported_count,
             total_events_extracted=len(raw_events),
             total_events_deduplicated=len(timeline_events),
             total_correlated_groups=corr_count,
             files=file_reports,
+            warnings=warnings,
             skipped_reasons=skipped_details,
         )
 
         return ev, summary
+
+    def _parser_display_name(self, art_type: str) -> str:
+        names = {
+            "evtx": "Windows EVTX Parser",
+            "registry_hive": "Registry Hive Parser",
+            "browser_sqlite": "SQLite Browser Parser",
+            "pcap": "Scapy PCAP Network Parser",
+            "memory": "Memory Process/Network Parser",
+            "csv_tabular": "Delimited Tabular CSV Parser",
+            "filesystem": "Filesystem MFT/Stat Parser",
+            "document_metadata": "Document Metadata Parser",
+            "json": "JSON Structured Parser",
+        }
+        return names.get(art_type, "Forensic Parser")
 
     def _create_artifact_row(self, evidence_id: int, rec: dict[str, Any]) -> Artifact:
         """Instantiate an Artifact model row populated with Common Forensic Event Schema fields."""

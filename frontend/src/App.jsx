@@ -842,54 +842,100 @@ export default function App() {
 
       {/* Ingestion Report Modal */}
       {ingestModal && (
-        <Dialog open={Boolean(ingestModal)} onClose={() => setIngestModal(null)} maxWidth="md" fullWidth>
+        <Dialog open={Boolean(ingestModal)} onClose={() => setIngestModal(null)} maxWidth="lg" fullWidth>
           <DialogTitle sx={{ bgcolor: "#091724", color: "#4fc3f7", fontWeight: 700 }}>
-            Automated Evidence Ingestion Report
+            Automated Evidence Ingestion & Verification Report
           </DialogTitle>
           <DialogContent sx={{ bgcolor: "#060d14", color: "#cfd8dc", pt: 2 }}>
             <Alert severity="success" sx={{ mb: 2, bgcolor: "#0b2216", color: "#a5d6a7" }}>
-              Successfully ingested <b>{ingestModal.filename}</b> (SHA-256: {ingestModal.sha256?.slice(0, 16)}...)
+              Successfully ingested evidence package: <b>{ingestModal.filename}</b> (SHA-256: {ingestModal.sha256})
             </Alert>
-            <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
-              <Paper sx={{ p: 1.5, flex: 1, bgcolor: "#0a1926" }}>
-                <Typography variant="caption" color="text.secondary">Files Discovered:</Typography>
-                <Typography variant="h5" sx={{ fontWeight: 700 }}>{ingestModal.summary?.total_files_discovered || 1}</Typography>
+
+            {/* Ingestion Metric Breakdown */}
+            <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap sx={{ mb: 2.5 }}>
+              <Paper sx={{ p: 1.5, minWidth: 130, flex: 1, bgcolor: "#0a1926", border: "1px solid #162b3d" }}>
+                <Typography variant="caption" color="text.secondary">Files Discovered</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 800 }}>{ingestModal.summary?.total_files_discovered || 1}</Typography>
               </Paper>
-              <Paper sx={{ p: 1.5, flex: 1, bgcolor: "#0a1926" }}>
-                <Typography variant="caption" color="text.secondary">Files Parsed:</Typography>
-                <Typography variant="h5" sx={{ fontWeight: 700, color: "#66bb6a" }}>{ingestModal.summary?.total_files_parsed || 1}</Typography>
+              <Paper sx={{ p: 1.5, minWidth: 130, flex: 1, bgcolor: "#0a1926", border: "1px solid #162b3d" }}>
+                <Typography variant="caption" color="text.secondary">Doc Excluded</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 800, color: "#90a4ae" }}>{ingestModal.summary?.total_documentation_excluded || 0}</Typography>
               </Paper>
-              <Paper sx={{ p: 1.5, flex: 1, bgcolor: "#0a1926" }}>
-                <Typography variant="caption" color="text.secondary">Artifacts Extracted:</Typography>
-                <Typography variant="h5" sx={{ fontWeight: 700, color: "#4fc3f7" }}>{ingestModal.summary?.total_events_extracted || ingestModal.artifact_count}</Typography>
+              <Paper sx={{ p: 1.5, minWidth: 130, flex: 1, bgcolor: "#0a1926", border: "1px solid #162b3d" }}>
+                <Typography variant="caption" color="text.secondary">Artifacts Identified</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 800, color: "#81d4fa" }}>{ingestModal.summary?.total_artifacts_identified || 1}</Typography>
               </Paper>
-              <Paper sx={{ p: 1.5, flex: 1, bgcolor: "#0a1926" }}>
-                <Typography variant="caption" color="text.secondary">Correlated Groups:</Typography>
-                <Typography variant="h5" sx={{ fontWeight: 700, color: "#ffa726" }}>{ingestModal.summary?.total_correlated_groups || 0}</Typography>
+              <Paper sx={{ p: 1.5, minWidth: 130, flex: 1, bgcolor: "#0a1926", border: "1px solid #162b3d" }}>
+                <Typography variant="caption" color="text.secondary">Successfully Parsed</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 800, color: "#66bb6a" }}>{ingestModal.summary?.total_successfully_parsed || 1}</Typography>
+              </Paper>
+              <Paper sx={{ p: 1.5, minWidth: 130, flex: 1, bgcolor: "#0a1926", border: "1px solid #162b3d" }}>
+                <Typography variant="caption" color="text.secondary">Empty / Review</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 800, color: (ingestModal.summary?.total_empty_artifacts || ingestModal.summary?.total_unsupported) ? "#ffa726" : "#66bb6a" }}>
+                  {(ingestModal.summary?.total_empty_artifacts || 0) + (ingestModal.summary?.total_unsupported || 0)}
+                </Typography>
+              </Paper>
+              <Paper sx={{ p: 1.5, minWidth: 130, flex: 1, bgcolor: "#0a1926", border: "1px solid #162b3d" }}>
+                <Typography variant="caption" color="text.secondary">Events Extracted</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 800, color: "#29b6f6" }}>{ingestModal.summary?.total_events_extracted || ingestModal.artifact_count}</Typography>
+              </Paper>
+              <Paper sx={{ p: 1.5, minWidth: 130, flex: 1, bgcolor: "#0a1926", border: "1px solid #162b3d" }}>
+                <Typography variant="caption" color="text.secondary">Correlated Groups</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 800, color: "#ffd54f" }}>{ingestModal.summary?.total_correlated_groups || 0}</Typography>
               </Paper>
             </Stack>
 
-            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Content-Identified Artifact Files:</Typography>
-            <TableContainer sx={{ border: "1px solid #162b3d", borderRadius: 1 }}>
-              <Table size="small">
+            {/* Warnings list if any */}
+            {(ingestModal.summary?.warnings || []).length > 0 && (
+              <Box sx={{ mb: 2 }}>
+                {ingestModal.summary.warnings.map((w, idx) => (
+                  <Alert key={idx} severity="warning" sx={{ mb: 1, bgcolor: "#211b08", color: "#ffe082" }}>
+                    {w}
+                  </Alert>
+                ))}
+              </Box>
+            )}
+
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Auditable Forensic Ingestion Manifest:</Typography>
+            <TableContainer sx={{ border: "1px solid #162b3d", borderRadius: 1, maxHeight: 320 }}>
+              <Table size="small" stickyHeader>
                 <TableHead>
-                  <TableRow sx={{ "& th": { bgcolor: "#0e2233", color: "#b0bec5" } }}>
-                    <TableCell>File</TableCell>
-                    <TableCell>Detected Artifact Type</TableCell>
-                    <TableCell>Magic Signature</TableCell>
-                    <TableCell>Events</TableCell>
+                  <TableRow sx={{ "& th": { bgcolor: "#0e2233", color: "#b0bec5", fontSize: 11, fontWeight: 700 } }}>
+                    <TableCell>Discovered File</TableCell>
+                    <TableCell>Detected Type</TableCell>
+                    <TableCell>Parser</TableCell>
+                    <TableCell align="center">Events</TableCell>
                     <TableCell>Status</TableCell>
+                    <TableCell>Forensic Reason / Action</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {(ingestModal.summary?.files || []).map((f, idx) => (
-                    <TableRow key={idx}>
-                      <TableCell sx={{ fontFamily: "IBM Plex Mono", fontSize: 11 }}>{f.relative_path}</TableCell>
-                      <TableCell><Chip size="small" label={f.detected_type} sx={{ height: 18, fontSize: 10 }} /></TableCell>
-                      <TableCell sx={{ fontSize: 11, color: "#90a4ae" }}>{f.magic_signature}</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>{f.events_extracted}</TableCell>
+                    <TableRow key={idx} hover sx={{ "& td": { borderColor: "#142433", py: 1, fontSize: 12 } }}>
+                      <TableCell sx={{ fontFamily: "IBM Plex Mono", color: "#81d4fa" }}>{f.relative_path}</TableCell>
+                      <TableCell><Chip size="small" label={f.detected_type} sx={{ height: 18, fontSize: 10, bgcolor: "#102a3d", color: "#4fc3f7" }} /></TableCell>
+                      <TableCell sx={{ fontSize: 11, color: "#90a4ae" }}>{f.parser_name || "Specialized Parser"}</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 700, color: f.events_extracted > 0 ? "#66bb6a" : "inherit" }}>
+                        {f.events_extracted}
+                      </TableCell>
                       <TableCell>
-                        <Chip size="small" label={f.status} color={f.status === "parsed" ? "success" : "default"} sx={{ height: 18, fontSize: 10 }} />
+                        <Chip
+                          size="small"
+                          label={f.status}
+                          color={
+                            f.status === "parsed"
+                              ? "success"
+                              : f.status === "empty" || f.status === "needs_review"
+                              ? "warning"
+                              : f.status === "error"
+                              ? "error"
+                              : "default"
+                          }
+                          sx={{ height: 18, fontSize: 10, textTransform: "uppercase", fontWeight: 700 }}
+                        />
+                      </TableCell>
+                      <TableCell sx={{ fontSize: 11, color: "#b0bec5", maxWidth: 300 }}>
+                        {f.reason} {f.recommended_action ? `[Action: ${f.recommended_action}]` : ""}
                       </TableCell>
                     </TableRow>
                   ))}
