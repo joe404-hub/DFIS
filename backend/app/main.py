@@ -605,6 +605,7 @@ def report_json(case_id: int, db: Session = Depends(get_db)):
         "risk": analysis.get("risk"),
         "attack_chain": analysis.get("attack_chain"),
         "correlations": analysis.get("correlations"),
+        "evidentiary_states": analysis.get("evidentiary_states") or [],
         "usb_qa": _usb_transfer_answer(analysis, [_art_to_dict(a) for a in arts]),
         "next_actions": analysis.get("next_actions") or [],
         "timeline": [_art_to_dict(a) for a in arts if a.source_type != "correlated"][:80],

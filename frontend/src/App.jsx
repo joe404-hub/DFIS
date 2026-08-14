@@ -661,6 +661,46 @@ export default function App() {
                       ATT&CK techniques and attack-chain stages are investigative hypotheses synthesized from multi-source correlations.
                     </Typography>
 
+                    {/* 4-Tier Forensic Evidentiary States */}
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1, color: "#81d4fa" }}>
+                      Forensic Evidentiary State Breakdown
+                    </Typography>
+                    <TableContainer sx={{ border: "1px solid #162b3d", borderRadius: 1.5, mb: 3 }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow sx={{ "& th": { bgcolor: "#0e2233", color: "#b0bec5", fontSize: 11, fontWeight: 700 } }}>
+                            <TableCell>Investigation Finding</TableCell>
+                            <TableCell>Evidentiary State</TableCell>
+                            <TableCell>Forensic Detail & Evidence Alignment</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {(inv?.evidentiary_states || []).map((st, idx) => (
+                            <TableRow key={idx} hover sx={{ "& td": { borderColor: "#142433", py: 0.8, fontSize: 12 } }}>
+                              <TableCell sx={{ fontWeight: 600, color: "#eceff1" }}>{st.finding}</TableCell>
+                              <TableCell>
+                                <Chip
+                                  size="small"
+                                  label={st.state}
+                                  color={
+                                    st.state === "OBSERVED"
+                                      ? "success"
+                                      : st.state === "SUPPORTED HYPOTHESIS"
+                                      ? "secondary"
+                                      : st.state === "INSUFFICIENT EVIDENCE"
+                                      ? "warning"
+                                      : "default"
+                                  }
+                                  sx={{ height: 18, fontSize: 9, fontWeight: 800 }}
+                                />
+                              </TableCell>
+                              <TableCell sx={{ color: "#b0bec5" }}>{st.detail}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+
                     {/* Attack Chain Stepper */}
                     <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Reconstructed Attack Chain Hypothesis</Typography>
                     <Stack spacing={1} sx={{ mb: 3 }}>
@@ -670,11 +710,16 @@ export default function App() {
                             <Typography variant="subtitle2" sx={{ fontWeight: 600, color: "#81d4fa" }}>
                               {s.title}
                             </Typography>
-                            <Chip size="small" label={s.mitre || "T1052"} color="secondary" sx={{ height: 20, fontSize: 10 }} />
+                            <Chip size="small" label={s.mitre || "—"} color={s.status === "observed" ? "success" : "secondary"} sx={{ height: 20, fontSize: 10 }} />
                           </Stack>
                           <Typography variant="caption" sx={{ color: "#90a4ae" }}>
-                            Time: {s.time} • Confidence: {s.confidence} • Linked Evidence IDs: {(s.evidence_event_ids || []).join(", ") || "—"}
+                            Time: {s.time} • Status: <b>{s.status}</b> ({s.confidence}) • Linked Evidence IDs: {(s.evidence_event_ids || []).join(", ") || "—"}
                           </Typography>
+                          {s.note && (
+                            <Typography variant="caption" sx={{ display: "block", color: "#b0bec5", mt: 0.5 }}>
+                              {s.note}
+                            </Typography>
+                          )}
                         </Paper>
                       ))}
                     </Stack>

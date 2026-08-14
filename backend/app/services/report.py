@@ -33,25 +33,36 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
     story.append(_table(rows))
 
     story.append(Spacer(1, 10))
-    story.append(Paragraph("2. Incident classification", styles["Heading2"]))
+    story.append(Paragraph("2. Incident classification & Evidentiary States", styles["Heading2"]))
     story.append(
         Paragraph(
-            f"Hypothesis: <b>Possible {analysis.get('category')}</b> / {analysis.get('secondary') or ''} "
-            f"&nbsp; Risk Priority: {analysis.get('risk_score')}/100 — "
+            f"Working Classification: <b>Possible {analysis.get('category')}</b> / {analysis.get('secondary') or ''} "
+            f"&nbsp; Investigation Priority: {analysis.get('risk_score')}/100 — "
             f"{(analysis.get('risk') or {}).get('priority') or analysis.get('priority') or 'PRIORITY'} "
-            f"(not a probability of crime)",
+            f"(prioritization aid, not legal culpability)",
             styles["BodyText"],
         )
     )
     story.append(
         Paragraph(
-            "Malicious intent cannot be established from these events alone.",
+            "Malicious intent and unauthorized access cannot be established from logs alone.",
             styles["Italic"],
         )
     )
 
+    # 4-Tier Evidentiary States Table
+    ev_states = analysis.get("evidentiary_states") or []
+    if ev_states:
+        story.append(Spacer(1, 6))
+        story.append(Paragraph("<b>Forensic Evidentiary State Breakdown</b>", styles["Heading3"]))
+        srows = [["Investigation Finding", "Evidentiary State", "Forensic Detail"]]
+        for s in ev_states:
+            srows.append([s.get("finding", ""), s.get("state", ""), s.get("detail", "")[:75]])
+        story.append(_table(srows))
+
     risk = analysis.get("risk") or {}
     if risk.get("indicators"):
+        story.append(Spacer(1, 8))
         story.append(Paragraph("3. Transparent risk indicators (prototype weights)", styles["Heading2"]))
         story.append(Paragraph(risk.get("disclaimer") or "", styles["Italic"]))
         rrows = [["Fired", "Points", "Indicator"]]
@@ -68,7 +79,7 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
         crows.append(
             [
                 str(s.get("time") or "")[:19],
-                (s.get("title") or "")[:40],
+                (s.get("title") or "")[:35],
                 s.get("mitre") or "—",
                 s.get("status") or "hypothesized",
                 s.get("confidence") or "",
@@ -104,7 +115,8 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
     else:
         story.append(
             Paragraph(
-                "No file-copy correlation is available to answer whether confidential data was copied to USB.",
+                "No file-copy correlation is available to answer whether confidential data was copied to USB. "
+                "USB-based confidential data transfer is NOT established by the evidence.",
                 styles["BodyText"],
             )
         )
