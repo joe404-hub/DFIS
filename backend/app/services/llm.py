@@ -44,7 +44,24 @@ MANDATORY FORENSIC GROUNDING RULES:
 5. UNCERTAINTY & GAPS: If evidence for an action (e.g. USB transfer, file copy, exfiltration) is not present, explicitly state that it is NOT ESTABLISHED or INSUFFICIENT EVIDENCE. Do not extrapolate beyond facts.
 6. ATT&CK MAPPINGS & HYPOTHESES: MITRE ATT&CK technique labels (e.g. T1567, T1052.001, T1078) are analytical classifications, NOT established facts. Any ATT&CK mapping represents an analytical hypothesis requiring examiner verification and does not by itself establish that the technique succeeded or occurred maliciously.
 7. GENERAL KNOWLEDGE: General technical explanations are interpretive context only and cannot be used as case evidence.
-8. DISCLAIMERS: Always uphold the principle that AI is an investigative assistant, not an evidence source."""
+8. DISCLAIMERS: Always uphold the principle that AI is an investigative assistant, not an evidence source.
+
+FORMATTING & PRESENTATION RULES:
+- Do not output raw internal prompt instructions, bracketed labels, or pseudo-delimiters (do not output [RESPONSE GENERATION], [USER QUESTION ANSWER], etc.).
+- Do not escape Markdown characters (do not output \\*\\* or \\*). Output clean standard Markdown only (use headings ##, bold **, bullet points -).
+- Do not output empty bullet points, trailing asterisks (*), or malformed markdown headers.
+- Put each section heading on its own line.
+- For technical concepts, use clean visible headings:
+  ## Concept Definition
+  ## Case-Specific Context
+  ## Forensic Interpretation Rules
+  ## Forensic Notice
+- For case investigation questions, use clean visible headings:
+  ## Forensic Assessment
+  ## Observed Case Evidence
+  ## Evidence Gaps & Missing Evidence
+  ## Investigative Interpretation
+  ## Forensic Notice"""
 
 DISCLAIMER_TEXT = (
     "\n\nGeneral forensic knowledge is interpretive only and cannot be used as case evidence.\n"
@@ -211,15 +228,38 @@ def query_ollama(
     return None
 
 
-def post_process_llm_answer(raw_answer: str, query_type: str) -> str:
-    """Ensure grounded disclaimers and clean formatting on local LLM outputs."""
-    answer = raw_answer.strip()
+def normalize_llm_response(text: str) -> str:
+    """Clean and normalize LLM markdown output, stripping escaped symbols and malformed markers."""
+    if not text:
+        return ""
 
-    # If the model produced a '--- FINAL RESPONSE ---' section, extract it if meaningful
-    if "--- FINAL RESPONSE ---" in answer:
-        final_part = answer.split("--- FINAL RESPONSE ---")[-1].strip()
+    # Convert escaped Markdown into normal clean Markdown
+    text = text.replace(r"\*\*", "**")
+    text = text.replace(r"\*", "*")
+    text = text.replace(r"\_", "_")
+    text = text.replace(r"\#", "#")
+    text = text.replace(r"\[", "[")
+    text = text.replace(r"\]", "]")
+    text = text.replace(r"\(", "(")
+    text = text.replace(r"\)", ")")
+
+    # Clean malformed heading markers like *IMPORTANT NOTE:** or **TECHNICAL DEFINITION:**
+    text = re.sub(r"^\s*[\*\-]?\s*\*?IMPORTANT NOTE:?\*?\*?", "\n\n## Important Forensic Note\n", text, flags=re.MULTILINE | re.IGNORECASE)
+    text = re.sub(r"^\s*[\*\-]?\s*\*?AUTHENTICATION VS UNAUTHORIZED ACCESS:?\*?\*?", "\n\n## Successful Logon ≠ Unauthorized Access\n", text, flags=re.MULTILINE | re.IGNORECASE)
+    text = re.sub(r"^\s*[\*\-]?\s*\*?NETWORK ACTIVITY VS EXFILTRATION:?\*?\*?", "\n\n## Network Activity ≠ Data Exfiltration\n", text, flags=re.MULTILINE | re.IGNORECASE)
+    text = re.sub(r"^\s*[\*\-]?\s*\*?USB CONNECTION VS DATA EXFILTRATION:?\*?\*?", "\n\n## USB Connection ≠ Data Exfiltration\n", text, flags=re.MULTILINE | re.IGNORECASE)
+    text = re.sub(r"^\s*[\*\-]?\s*\*?TECHNICAL DEFINITION:?\*?\*?", "\n\n## Concept Definition\n", text, flags=re.MULTILINE | re.IGNORECASE)
+    text = re.sub(r"^\s*[\*\-]?\s*\*?CASE-SPECIFIC CONTEXT:?\*?\*?", "\n\n## Case-Specific Context\n", text, flags=re.MULTILINE | re.IGNORECASE)
+
+    # Clean isolated asterisks or empty bullet lines
+    text = re.sub(r"^\s*[\*\-]\s*$", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*\*\*\s*$", "", text, flags=re.MULTILINE)
+
+    # If the model produced a '--- FINAL RESPONSE ---' section, extract it
+    if "--- FINAL RESPONSE ---" in text:
+        final_part = text.split("--- FINAL RESPONSE ---")[-1].strip()
         if len(final_part) > 30:
-            answer = final_part
+            text = final_part
 
     # Strip internal prompt markers and pseudo-delimiters if echoed by the neural model
     prompt_markers = [
@@ -237,25 +277,33 @@ def post_process_llm_answer(raw_answer: str, query_type: str) -> str:
         r"\[MANDATORY FORENSIC GROUNDING RULES\]",
     ]
     for pattern in prompt_markers:
-        answer = re.sub(pattern, "", answer, flags=re.IGNORECASE | re.MULTILINE)
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE | re.MULTILINE)
 
     # Normalize inline bracketed section titles and list items onto dedicated lines
     section_replacements = [
-        (r"\[?FORENSIC ASSESSMENT\]?:?", "\n\nFORENSIC ASSESSMENT:\n"),
-        (r"\[?OBSERVED EVIDENCE\]?:?", "\n\nOBSERVED EVIDENCE:\n"),
-        (r"\[?EVIDENTIARY STATE BREAKDOWN\]?:?", "\n\nEVIDENTIARY STATE BREAKDOWN:\n"),
-        (r"\[?EVIDENCE GAPS(?:\s*&\s*UNVERIFIED ASPECTS)?\]?:?", "\n\nEVIDENCE GAPS & UNVERIFIED ASPECTS:\n"),
-        (r"\[?INVESTIGATIVE INTERPRETATION(?:\s*&\s*ATT&CK ANALYSIS)?\]?:?", "\n\nINVESTIGATIVE INTERPRETATION:\n"),
-        (r"\[?CASE-SPECIFIC CONTEXT\]?:?", "\n\nCASE-SPECIFIC CONTEXT:\n"),
+        (r"\[?FORENSIC ASSESSMENT\]?:?", "\n\n## Forensic Assessment\n"),
+        (r"\[?OBSERVED EVIDENCE\]?:?", "\n\n## Observed Case Evidence\n"),
+        (r"\[?EVIDENTIARY STATE BREAKDOWN\]?:?", "\n\n## Evidentiary State Breakdown\n"),
+        (r"\[?EVIDENCE GAPS(?:\s*&\s*UNVERIFIED ASPECTS)?\]?:?", "\n\n## Evidence Gaps & Missing Evidence\n"),
+        (r"\[?INVESTIGATIVE INTERPRETATION(?:\s*&\s*ATT&CK ANALYSIS)?\]?:?", "\n\n## Investigative Interpretation\n"),
+        (r"\[?CASE-SPECIFIC CONTEXT(?:\s*&\s*EVIDENCE OBSERVATIONS)?\]?:?", "\n\n## Case-Specific Context\n"),
         (r"(?<=\))\s*-\s*", "\n- "),
         (r"(?<=\.)\s*-\s*", "\n- "),
         (r"(?<=\])\s*-\s*", "\n- "),
     ]
     for pattern, replacement in section_replacements:
-        answer = re.sub(pattern, replacement, answer, flags=re.IGNORECASE)
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
 
     # Clean double blank lines
-    answer = re.sub(r"\n{3,}", "\n\n", answer).strip()
+    while "\n\n\n" in text:
+        text = text.replace("\n\n\n", "\n\n")
+
+    return text.strip()
+
+
+def post_process_llm_answer(raw_answer: str, query_type: str) -> str:
+    """Ensure grounded disclaimers and clean formatting on local LLM outputs."""
+    answer = normalize_llm_response(raw_answer)
 
     # For greetings, ensure no case dumping
     if query_type == "greeting":

@@ -1734,15 +1734,35 @@ function GenerationProvenanceCard({ generator }) {
         )}
       </Box>
 
-      <Divider sx={{ my: 1, borderColor: isLLM ? "#064e3b" : "#451a03" }} />
+      {/* Provenance grid with dedicated spacing */}
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
+          gap: 1.5,
+          pt: 1.2,
+          mt: 0.8,
+          borderTop: isLLM ? "1px solid #064e3b" : isAssistant ? "1px solid #0c4a6e" : "1px solid #451a03",
+        }}
+      >
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.3 }}>
+          <Typography variant="caption" sx={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.06em", color: "#64748b", fontWeight: 700 }}>
+            Provenance ID
+          </Typography>
+          <Box component="code" sx={{ color: isLLM ? "#a7f3d0" : isAssistant ? "#7dd3fc" : "#fde68a", bgcolor: "rgba(0,0,0,0.3)", px: 0.8, py: 0.2, borderRadius: 1, fontSize: 11, fontWeight: 700, width: "fit-content" }}>
+            {provId}
+          </Box>
+        </Box>
 
-      {/* Bottom row */}
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ fontSize: 10.5, color: "#94a3b8" }}>
-        <span>
-          Provenance ID: <code style={{ color: isLLM ? "#a7f3d0" : "#fde68a", fontWeight: 700 }}>{provId}</code>
-        </span>
-        <span>Generated: <span style={{ color: "#cbd5e1" }}>{genTime}</span></span>
-      </Stack>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.3 }}>
+          <Typography variant="caption" sx={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.06em", color: "#64748b", fontWeight: 700 }}>
+            Generated At
+          </Typography>
+          <Typography variant="caption" sx={{ color: "#cbd5e1", fontSize: 11, fontFamily: "IBM Plex Mono", mt: 0.2 }}>
+            {genTime}
+          </Typography>
+        </Box>
+      </Box>
     </Paper>
   );
 }
@@ -1785,12 +1805,23 @@ function ForensicConsoleAnswer({ answer, generator, viewMode, setViewMode }) {
 
   // Normalize all possible section header variants into unified tokens
   cleanText = cleanText
+    .replace(/##\s*Concept Definition:?/gi, "\n\n__SEC_ASSESSMENT__\n")
+    .replace(/##\s*Forensic Assessment:?/gi, "\n\n__SEC_ASSESSMENT__\n")
     .replace(/\[?FORENSIC ASSESSMENT\]?:?/gi, "\n\n__SEC_ASSESSMENT__\n")
+    .replace(/##\s*Observed Case Evidence:?/gi, "\n\n__SEC_EVIDENCE__\n")
     .replace(/\[?OBSERVED EVIDENCE\]?:?/gi, "\n\n__SEC_EVIDENCE__\n")
+    .replace(/##\s*Evidentiary State Breakdown:?/gi, "\n\n__SEC_STATES__\n")
     .replace(/\[?EVIDENTIARY STATE BREAKDOWN\]?:?/gi, "\n\n__SEC_STATES__\n")
+    .replace(/##\s*Evidence Gaps(?: & Missing Evidence)?:?/gi, "\n\n__SEC_GAPS__\n")
     .replace(/\[?EVIDENCE GAPS(?:\s*&\s*UNVERIFIED ASPECTS)?\]?:?/gi, "\n\n__SEC_GAPS__\n")
+    .replace(/##\s*Investigative Interpretation:?/gi, "\n\n__SEC_INTERPRETATION__\n")
     .replace(/\[?INVESTIGATIVE INTERPRETATION(?:\s*&\s*ATT&CK ANALYSIS)?\]?:?/gi, "\n\n__SEC_INTERPRETATION__\n")
+    .replace(/##\s*Case-Specific Context:?/gi, "\n\n__SEC_CONTEXT__\n")
     .replace(/\[?CASE-SPECIFIC CONTEXT(?:\s*&\s*EVIDENCE OBSERVATIONS)?\]?:?/gi, "\n\n__SEC_CONTEXT__\n")
+    .replace(/##\s*(?:Successful Logon ≠ Unauthorized Access|AUTHENTICATION VS UNAUTHORIZED ACCESS):?/gi, "\n\n__SEC_RULE_AUTH__\n")
+    .replace(/##\s*(?:Network Activity ≠ Data Exfiltration|NETWORK ACTIVITY VS EXFILTRATION):?/gi, "\n\n__SEC_RULE_NET__\n")
+    .replace(/##\s*(?:USB Connection ≠ Data Exfiltration|USB CONNECTION VS DATA EXFILTRATION):?/gi, "\n\n__SEC_RULE_USB__\n")
+    .replace(/##\s*Important Forensic Note:?/gi, "\n\n__SEC_RULE_NOTE__\n")
     .replace(/(?<=\))\s*-\s*/g, "\n- ")
     .replace(/(?<=\.)\s*-\s*/g, "\n- ")
     .replace(/(?<=\])\s*-\s*/g, "\n- ");
@@ -1912,8 +1943,23 @@ function ForensicConsoleAnswer({ answer, generator, viewMode, setViewMode }) {
   const contextRaw = sections["CONTEXT"] || "";
   const contextItems = contextRaw
     .split("\n")
-    .map((l) => l.replace(/^[-\u2022*]\s*/, "").trim())
-    .filter(Boolean);
+    .map((l) => l.replace(/^[-\u2022*]\s*/, "").replace(/^\*+\s*/, "").trim())
+    .filter((l) => l && l !== "*" && l !== "**");
+
+  // 7. Forensic Interpretation Rules Callouts
+  const rulesItems = [];
+  if (sections["RULE_NET"]) {
+    rulesItems.push({ title: "Network Activity ≠ Data Exfiltration", desc: sections["RULE_NET"], icon: "net" });
+  }
+  if (sections["RULE_AUTH"]) {
+    rulesItems.push({ title: "Successful Logon ≠ Unauthorized Access", desc: sections["RULE_AUTH"], icon: "auth" });
+  }
+  if (sections["RULE_USB"]) {
+    rulesItems.push({ title: "USB Connection ≠ Data Exfiltration", desc: sections["RULE_USB"], icon: "usb" });
+  }
+  if (sections["RULE_NOTE"]) {
+    rulesItems.push({ title: "Important Forensic Note", desc: sections["RULE_NOTE"], icon: "note" });
+  }
 
   const highlightEvidence = (text) => {
     if (!text) return null;
@@ -1928,10 +1974,10 @@ function ForensicConsoleAnswer({ answer, generator, viewMode, setViewMode }) {
             sx={{
               display: "inline-block",
               mx: 0.4,
-              px: 0.6,
+              px: 0.7,
               py: 0.1,
               borderRadius: 0.8,
-              bgcolor: "#112a45",
+              bgcolor: "#0b263e",
               color: "#38bdf8",
               fontFamily: "IBM Plex Mono",
               fontSize: 11,
@@ -1945,6 +1991,15 @@ function ForensicConsoleAnswer({ answer, generator, viewMode, setViewMode }) {
       }
       return part;
     });
+  };
+
+  const ruleIcon = (type) => {
+    switch (type) {
+      case "net": return <WarningAmberIcon sx={{ color: "#f59e0b", fontSize: 18 }} />;
+      case "auth": return <LockIcon sx={{ color: "#38bdf8", fontSize: 18 }} />;
+      case "usb": return <HelpOutlineIcon sx={{ color: "#ec4899", fontSize: 18 }} />;
+      default: return <SecurityIcon sx={{ color: "#81d4fa", fontSize: 18 }} />;
+    }
   };
 
   return (
@@ -2032,6 +2087,27 @@ function ForensicConsoleAnswer({ answer, generator, viewMode, setViewMode }) {
                 ))}
               </Paper>
             </Box>
+          )}
+
+          {/* Forensic Interpretation Rules Callouts */}
+          {rulesItems.length > 0 && (
+            <Stack spacing={1}>
+              {rulesItems.map((rule, idx) => (
+                <Paper key={idx} sx={{ p: 1.4, bgcolor: "#181404", border: "1px solid #92400e", borderRadius: 1.5 }}>
+                  <Stack direction="row" spacing={1} alignItems="flex-start">
+                    {ruleIcon(rule.icon)}
+                    <Box>
+                      <Typography variant="subtitle2" sx={{ color: "#fbbf24", fontWeight: 700, fontSize: 12, mb: 0.4 }}>
+                        {rule.title}
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: "#fef3c7", fontSize: 12, lineHeight: 1.5 }}>
+                        {highlightEvidence(rule.desc)}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </Paper>
+              ))}
+            </Stack>
           )}
 
           {/* Forensic Notice */}
