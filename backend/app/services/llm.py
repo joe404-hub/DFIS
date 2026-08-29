@@ -221,7 +221,7 @@ def post_process_llm_answer(raw_answer: str, query_type: str) -> str:
         if len(final_part) > 30:
             answer = final_part
 
-    # Strip internal bracketed prompt markers and pseudo-delimiters if echoed by the neural model
+    # Strip internal prompt markers and pseudo-delimiters if echoed by the neural model
     prompt_markers = [
         r"^:\s*",
         r"---+\s*(OBJECTIVE RESPONSE|FINAL RESPONSE|EVIDENCE GROUNDING|CITATION|RETRIEVED FORENSIC KNOWLEDGE BASE[^\-]*)\s*---+",
@@ -238,6 +238,21 @@ def post_process_llm_answer(raw_answer: str, query_type: str) -> str:
     ]
     for pattern in prompt_markers:
         answer = re.sub(pattern, "", answer, flags=re.IGNORECASE | re.MULTILINE)
+
+    # Normalize inline bracketed section titles and list items onto dedicated lines
+    section_replacements = [
+        (r"\[?FORENSIC ASSESSMENT\]?:?", "\n\nFORENSIC ASSESSMENT:\n"),
+        (r"\[?OBSERVED EVIDENCE\]?:?", "\n\nOBSERVED EVIDENCE:\n"),
+        (r"\[?EVIDENTIARY STATE BREAKDOWN\]?:?", "\n\nEVIDENTIARY STATE BREAKDOWN:\n"),
+        (r"\[?EVIDENCE GAPS(?:\s*&\s*UNVERIFIED ASPECTS)?\]?:?", "\n\nEVIDENCE GAPS & UNVERIFIED ASPECTS:\n"),
+        (r"\[?INVESTIGATIVE INTERPRETATION(?:\s*&\s*ATT&CK ANALYSIS)?\]?:?", "\n\nINVESTIGATIVE INTERPRETATION:\n"),
+        (r"\[?CASE-SPECIFIC CONTEXT\]?:?", "\n\nCASE-SPECIFIC CONTEXT:\n"),
+        (r"(?<=\))\s*-\s*", "\n- "),
+        (r"(?<=\.)\s*-\s*", "\n- "),
+        (r"(?<=\])\s*-\s*", "\n- "),
+    ]
+    for pattern, replacement in section_replacements:
+        answer = re.sub(pattern, replacement, answer, flags=re.IGNORECASE)
 
     # Clean double blank lines
     answer = re.sub(r"\n{3,}", "\n\n", answer).strip()
