@@ -1450,7 +1450,12 @@ function EvidenceStatusBadge({ status }) {
   let border = "#334155";
   let icon = null;
 
-  if (s.includes("OBSERVED") || (s.includes("ESTABLISHED") && !s.includes("NOT"))) {
+  if (s.includes("CONCEPT") || s.includes("INTERPRETIVE") || s.includes("DEFINITION")) {
+    color = "#38bdf8";
+    bg = "#082f49";
+    border = "#0288d1";
+    icon = <SecurityIcon sx={{ fontSize: 13, mr: 0.4 }} />;
+  } else if (s.includes("OBSERVED") || (s.includes("ESTABLISHED") && !s.includes("NOT"))) {
     color = "#34d399";
     bg = "#022c22";
     border = "#059669";
@@ -1592,8 +1597,10 @@ function GenerationProvenanceCard({ generator }) {
 function ForensicConsoleAnswer({ answer, generator, viewMode, setViewMode }) {
   if (!answer) return null;
 
-  // Clean raw prompt labels if present
+  // Clean raw prompt labels and pseudo-delimiters if present
   let cleanText = answer
+    .replace(/^:\s*/, "")
+    .replace(/---+\s*(OBJECTIVE RESPONSE|FINAL RESPONSE|EVIDENCE GROUNDING|CITATION|RETRIEVED FORENSIC KNOWLEDGE BASE[^\-]*)\s*---+/gi, "")
     .replace(/\[RESPONSE GENERATION\]/gi, "")
     .replace(/\[USER QUESTION ANSWER\]/gi, "")
     .replace(/\[AUTHORITATIVE CASE STATE CITATION\]/gi, "")
@@ -1613,10 +1620,21 @@ function ForensicConsoleAnswer({ answer, generator, viewMode, setViewMode }) {
     cleanText = cleanText.slice(0, discIndex).trim();
   }
 
-  // Detect key status in answer
+  // Detect if this is a Technical Concept Definition query vs Case Investigation
+  const isConcept = Boolean(
+    cleanText.includes("CASE-SPECIFIC CONTEXT:") ||
+    cleanText.toLowerCase().includes("stands for") ||
+    cleanText.toLowerCase().includes("unique identifier") ||
+    cleanText.toLowerCase().includes("is the secure version") ||
+    /^(question:\s*)?(what is|what does|explain|define)\b/i.test(cleanText)
+  );
+
   let assessmentState = null;
   const upper = cleanText.toUpperCase();
-  if (upper.includes("NOT ESTABLISHED")) {
+
+  if (isConcept) {
+    assessmentState = "CONCEPT DEFINITION";
+  } else if (upper.includes("NOT ESTABLISHED")) {
     assessmentState = "NOT ESTABLISHED";
   } else if (upper.includes("SUPPORTED HYPOTHESIS")) {
     assessmentState = "SUPPORTED HYPOTHESIS";
@@ -1632,6 +1650,7 @@ function ForensicConsoleAnswer({ answer, generator, viewMode, setViewMode }) {
   const stateMatrixItems = [];
   const gapItems = [];
   const bodyParagraphs = [];
+  const contextParagraphs = [];
   
   let hypothesisTitle = "";
   let interpretationStatus = "";
@@ -1643,7 +1662,10 @@ function ForensicConsoleAnswer({ answer, generator, viewMode, setViewMode }) {
   let currentSection = "body";
   for (const line of rawLines) {
     const lUpper = line.toUpperCase();
-    if (lUpper.startsWith("OBSERVED EVIDENCE:") || lUpper.startsWith("CASE EVIDENCE") || lUpper.startsWith("OBSERVED EVIDENCE")) {
+    if (lUpper.startsWith("CASE-SPECIFIC CONTEXT:") || lUpper.startsWith("CASE SPECIFIC CONTEXT:")) {
+      currentSection = "concept_context";
+      continue;
+    } else if (lUpper.startsWith("OBSERVED EVIDENCE:") || lUpper.startsWith("CASE EVIDENCE") || lUpper.startsWith("OBSERVED EVIDENCE")) {
       currentSection = "evidence";
       continue;
     } else if (lUpper.startsWith("EVIDENTIARY STATE BREAKDOWN:")) {
@@ -1657,7 +1679,9 @@ function ForensicConsoleAnswer({ answer, generator, viewMode, setViewMode }) {
       continue;
     }
 
-    if (currentSection === "evidence") {
+    if (currentSection === "concept_context") {
+      contextParagraphs.push(line);
+    } else if (currentSection === "evidence") {
       observedItems.push(line.replace(/^[-\u2022\u2713*]\s*/, ""));
     } else if (currentSection === "states") {
       stateMatrixItems.push(line.replace(/^[-\u2022*]\s*/, ""));
@@ -1773,7 +1797,47 @@ function ForensicConsoleAnswer({ answer, generator, viewMode, setViewMode }) {
             {answer}
           </Typography>
         </Paper>
+      ) : isConcept ? (
+        /* Render Concept Definition View */
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.8 }}>
+          <Box>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.8 }}>
+              <Typography variant="caption" sx={{ color: "#38bdf8", fontWeight: 800, letterSpacing: 0.8, textTransform: "uppercase" }}>
+                Technical Concept Definition
+              </Typography>
+              <EvidenceStatusBadge status="CONCEPT DEFINITION" />
+            </Stack>
+            <Paper sx={{ p: 1.5, bgcolor: "#0a1928", border: "1px solid #162f45", borderRadius: 1.5 }}>
+              <Typography variant="body2" sx={{ color: "#f1f5f9", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                {bodyParagraphs.length > 0 ? highlightEvidence(bodyParagraphs.join("\n\n")) : highlightEvidence(cleanText)}
+              </Typography>
+            </Paper>
+          </Box>
+
+          {contextParagraphs.length > 0 && (
+            <Box>
+              <Typography variant="caption" sx={{ color: "#34d399", fontWeight: 800, letterSpacing: 0.8, textTransform: "uppercase", display: "block", mb: 0.8 }}>
+                Case-Specific Context & Evidence Observations
+              </Typography>
+              <Paper sx={{ p: 1.5, bgcolor: "#031d17", border: "1px solid #064e3b", borderRadius: 1.5 }}>
+                {contextParagraphs.map((p, idx) => (
+                  <Typography key={idx} variant="body2" sx={{ color: "#e2e8f0", fontSize: 12.5, lineHeight: 1.6, mb: idx < contextParagraphs.length - 1 ? 1 : 0 }}>
+                    {highlightEvidence(p)}
+                  </Typography>
+                ))}
+              </Paper>
+            </Box>
+          )}
+
+          {/* Forensic Notice */}
+          <Paper sx={{ p: 1.2, bgcolor: "#030a12", border: "1px solid #0f2334", borderRadius: 1.2 }}>
+            <Typography variant="caption" sx={{ color: "#64748b", fontSize: 11, display: "block", lineHeight: 1.4 }}>
+              <b>AI INVESTIGATION NOTICE:</b> {disclaimer}
+            </Typography>
+          </Paper>
+        </Box>
       ) : (
+        /* Render Case Investigation View */
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.8 }}>
           {/* Section 1: Forensic Assessment */}
           <Box>

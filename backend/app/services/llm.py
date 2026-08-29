@@ -93,7 +93,23 @@ def build_forensic_prompt(
     kb_docs = rag.get("knowledge") or []
     kb_str = "\n".join(f"  * {k}" for k in kb_docs[:3]) if kb_docs else "  * Standard digital forensics baseline."
 
-    user_content = f"""[INVESTIGATION QUERY INTENT]: {query_type.upper()}
+    if query_type == "general":
+        user_content = f"""[INVESTIGATION QUERY INTENT]: GENERAL FORENSIC CONCEPT DEFINITION
+[USER QUESTION]: {question}
+
+--- RETRIEVED FORENSIC KNOWLEDGE BASE (INTERPRETIVE ONLY) ---
+{kb_str}
+
+--- CASE-SPECIFIC EVIDENCE FOR CONTEXT ONLY ---
+{ev_str}
+
+INSTRUCTIONS:
+1. Provide a clear, direct technical definition explaining what {question} means in digital forensics.
+2. If related network or artifact activity exists in this case, add a short section titled 'CASE-SPECIFIC CONTEXT:' citing relevant Evidence IDs.
+3. State clearly that common technical artifacts (e.g. HTTPS/443, port numbers) do not by themselves establish data exfiltration or malicious intent.
+4. Do NOT dump the case incident classification or risk template for this general definition question."""
+    else:
+        user_content = f"""[INVESTIGATION QUERY INTENT]: {query_type.upper()}
 [USER QUESTION]: {question}
 
 --- AUTHORITATIVE CASE STATE ---
@@ -103,7 +119,7 @@ Investigation Priority: {risk_score}/100 — {priority}
 --- 4-TIER EVIDENTIARY STATES ---
 {states_str}
 
---- CORRELATED ACTIVITY GROUPS (ANALYTICAL RELATIONSHIPS) ---
+--- CORRELATED ACTIVITY GROUPS ---
 {groups_str}
 
 --- INGESTED CASE EVIDENCE SAMPLES ---
@@ -112,7 +128,12 @@ Investigation Priority: {risk_score}/100 — {priority}
 --- RETRIEVED FORENSIC KNOWLEDGE BASE (INTERPRETIVE ONLY) ---
 {kb_str}
 
-Please generate an objective, forensically grounded response to the examiner's question. Follow all grounding rules strictly."""
+INSTRUCTIONS:
+Provide an objective, structured response following these sections:
+FORENSIC ASSESSMENT: State whether the finding is OBSERVED, NOT ESTABLISHED, or HYPOTHESIZED with supporting rationale.
+OBSERVED EVIDENCE: List specific observed case events with exact Evidence IDs (e.g. Evidence ID [27, 28]).
+EVIDENCE GAPS: Explicitly state any missing or unverified evidence (e.g. drive-to-device mapping).
+INVESTIGATIVE INTERPRETATION: Explain analytical hypotheses (e.g. ATT&CK mappings) and examiner verification steps."""
 
     return [
         {"role": "system", "content": FORENSIC_SYSTEM_PROMPT},
@@ -194,8 +215,16 @@ def post_process_llm_answer(raw_answer: str, query_type: str) -> str:
     """Ensure grounded disclaimers and clean formatting on local LLM outputs."""
     answer = raw_answer.strip()
 
-    # Strip internal bracketed prompt markers if echoed by the neural model
+    # If the model produced a '--- FINAL RESPONSE ---' section, extract it if meaningful
+    if "--- FINAL RESPONSE ---" in answer:
+        final_part = answer.split("--- FINAL RESPONSE ---")[-1].strip()
+        if len(final_part) > 30:
+            answer = final_part
+
+    # Strip internal bracketed prompt markers and pseudo-delimiters if echoed by the neural model
     prompt_markers = [
+        r"^:\s*",
+        r"---+\s*(OBJECTIVE RESPONSE|FINAL RESPONSE|EVIDENCE GROUNDING|CITATION|RETRIEVED FORENSIC KNOWLEDGE BASE[^\-]*)\s*---+",
         r"\[RESPONSE GENERATION\]",
         r"\[USER QUESTION ANSWER\]",
         r"\[AUTHORITATIVE CASE STATE CITATION\]",
@@ -208,7 +237,7 @@ def post_process_llm_answer(raw_answer: str, query_type: str) -> str:
         r"\[MANDATORY FORENSIC GROUNDING RULES\]",
     ]
     for pattern in prompt_markers:
-        answer = re.sub(pattern, "", answer, flags=re.IGNORECASE)
+        answer = re.sub(pattern, "", answer, flags=re.IGNORECASE | re.MULTILINE)
 
     # Clean double blank lines
     answer = re.sub(r"\n{3,}", "\n\n", answer).strip()
@@ -216,7 +245,6 @@ def post_process_llm_answer(raw_answer: str, query_type: str) -> str:
     # For greetings, ensure no case dumping
     if query_type == "greeting":
         if "Working classification:" in answer or "Investigation Priority:" in answer:
-            # Strip injected template if LLM regurgitated it
             lines = [l for l in answer.splitlines() if not l.startswith("Working classification:") and not l.startswith("Investigation Priority:")]
             answer = "\n".join(lines).strip()
         return answer
