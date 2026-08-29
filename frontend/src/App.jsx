@@ -170,30 +170,58 @@ export default function App() {
     if (active) loadCase(active);
   }, [active]);
 
-  // Vis Timeline initialization
+  // Vis Timeline initialization with dark theme, category grouping & compact badges
   useEffect(() => {
     if (!tlRef.current || tab !== 0) return;
     const filtered = timeline.filter((e) => e.timestamp);
     if (!filtered.length) return;
 
-    const items = new DataSet(
-      filtered.map((e) => ({
-        id: e.id,
-        content: `<b>${e.event_type}</b><br/>${escapeHtml(e.description).slice(0, 80)}`,
-        start: e.timestamp,
-        group: e.source_type,
-        className: e.source_type === "correlated" ? "hot" : riskClass(e),
+    const sourceLabels = {
+      windows_event: "Windows Logs",
+      registry: "Registry Hives",
+      browser: "Browser Activity",
+      network: "Network Traffic",
+      filesystem: "File System",
+      memory: "Memory Snapshot",
+      correlated: "Correlated Clusters",
+    };
+
+    const uniqueSources = [...new Set(filtered.map((e) => e.source_type || "other"))];
+    const groups = new DataSet(
+      uniqueSources.map((g) => ({
+        id: g,
+        content: `<b>${sourceLabels[g] || g.replace("_", " ").toUpperCase()}</b>`,
+        className: `tl-group-lane tl-group-${g}`,
       }))
     );
-    const groups = new DataSet(
-      [...new Set(filtered.map((e) => e.source_type))].map((g) => ({ id: g, content: g }))
+
+    const items = new DataSet(
+      filtered.map((e) => {
+        const shortTitle = escapeHtml(e.target || e.object || e.process || e.description || "").slice(0, 36);
+        return {
+          id: e.id,
+          content: `<div class="tl-item-content"><span class="tl-tag ${e.source_type}">${e.event_type}</span> <span class="tl-title">${shortTitle}</span></div>`,
+          start: e.timestamp,
+          group: e.source_type || "other",
+          className: `tl-src-${e.source_type} ${e.source_type === "correlated" ? "tl-correlated" : riskClass(e)}`,
+          title: `[${e.source_type}] ${e.event_type}\n${e.description}\nTime: ${e.timestamp}`,
+        };
+      })
     );
+
     if (tlInst.current) tlInst.current.destroy();
     tlInst.current = new Timeline(tlRef.current, items, groups, {
       stack: true,
+      stackSubgroups: true,
       orientation: "top",
-      margin: { item: 8 },
+      margin: { item: { horizontal: 6, vertical: 8 }, axis: 6 },
+      zoomKey: "ctrlKey",
+      minHeight: "320px",
+      maxHeight: "460px",
+      verticalScroll: true,
+      showCurrentTime: false,
     });
+
     tlInst.current.on("select", (properties) => {
       const selectedId = properties.items[0];
       const match = timeline.find((e) => e.id === selectedId);
@@ -328,6 +356,102 @@ export default function App() {
 
   return (
     <Box sx={{ display: "flex", minHeight: "100vh", bgcolor: "#060d13", color: "#e3edf5" }}>
+      <style>{`
+        /* Vis Timeline Dark Theme for DFIS Forensic Workstation */
+        .vis-timeline {
+          border: 1px solid #142a3e !important;
+          font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif !important;
+          background-color: #061019 !important;
+          border-radius: 8px !important;
+        }
+        .vis-panel.vis-center, .vis-panel.vis-left, .vis-panel.vis-right, .vis-panel.vis-top, .vis-panel.vis-bottom {
+          background-color: #061019 !important;
+          border-color: #122536 !important;
+        }
+        .vis-labelset .vis-label {
+          color: #94a3b8 !important;
+          font-size: 11px !important;
+          font-weight: 700 !important;
+          border-bottom: 1px solid #122536 !important;
+          background-color: #081522 !important;
+          padding: 4px 8px !important;
+        }
+        .vis-time-axis .vis-text {
+          color: #64748b !important;
+          font-family: "IBM Plex Mono", monospace !important;
+          font-size: 10px !important;
+        }
+        .vis-time-axis .vis-grid.vis-minor {
+          border-color: #0b1e2e !important;
+        }
+        .vis-time-axis .vis-grid.vis-major {
+          border-color: #132d44 !important;
+        }
+        .vis-item {
+          background-color: #0a1f33 !important;
+          border: 1px solid #0288d1 !important;
+          color: #e2e8f0 !important;
+          border-radius: 6px !important;
+          font-size: 11px !important;
+          box-shadow: 0 2px 5px rgba(0,0,0,0.4) !important;
+          transition: all 0.15s ease !important;
+        }
+        .vis-item.vis-selected {
+          border-color: #38bdf8 !important;
+          background-color: #0c3659 !important;
+          box-shadow: 0 0 10px rgba(56, 189, 248, 0.5) !important;
+          z-index: 99 !important;
+        }
+        .vis-item.tl-src-windows_event {
+          background-color: #082942 !important;
+          border-color: #0288d1 !important;
+        }
+        .vis-item.tl-src-registry {
+          background-color: #231038 !important;
+          border-color: #8b5cf6 !important;
+        }
+        .vis-item.tl-src-browser {
+          background-color: #301a04 !important;
+          border-color: #f59e0b !important;
+        }
+        .vis-item.tl-src-network {
+          background-color: #04291c !important;
+          border-color: #10b981 !important;
+        }
+        .vis-item.tl-src-filesystem {
+          background-color: #052930 !important;
+          border-color: #06b6d4 !important;
+        }
+        .vis-item.tl-src-memory {
+          background-color: #300a1c !important;
+          border-color: #ec4899 !important;
+        }
+        .vis-item.tl-src-correlated, .vis-item.hot, .vis-item.tl-correlated {
+          background-color: #332604 !important;
+          border-color: #eab308 !important;
+        }
+        .tl-item-content {
+          display: flex !important;
+          align-items: center !important;
+          gap: 6px !important;
+          padding: 2px 4px !important;
+          white-space: nowrap !important;
+        }
+        .tl-tag {
+          font-size: 9px !important;
+          font-weight: 800 !important;
+          text-transform: uppercase !important;
+          padding: 1px 5px !important;
+          border-radius: 3px !important;
+          background: rgba(255,255,255,0.12) !important;
+          letter-spacing: 0.4px !important;
+        }
+        .tl-title {
+          color: #f1f5f9 !important;
+          font-weight: 600 !important;
+          font-size: 11px !important;
+        }
+      `}</style>
       {/* Header Bar */}
       <AppBar position="fixed" sx={{ zIndex: 1201, bgcolor: "#091724", borderBottom: "1px solid #162b3d" }} elevation={0}>
         <Toolbar>
@@ -549,7 +673,36 @@ export default function App() {
                 {tab === 0 && (
                   <Box sx={{ p: 2 }}>
                     {/* Vis Timeline Canvas */}
-                    <Box ref={tlRef} sx={{ height: 260, bgcolor: "#050b11", borderRadius: 1.5, p: 1, mb: 2, border: "1px solid #162b3d" }} />
+                    <Box ref={tlRef} sx={{ height: 340, bgcolor: "#061019", borderRadius: 2, p: 0.5, mb: 2, border: "1px solid #142a3e" }} />
+
+                    {/* Selected Timeline Event Inspector */}
+                    {selectedEvent && (
+                      <Paper sx={{ p: 1.8, mb: 2, bgcolor: "#071624", border: "1px solid #0288d1", borderRadius: 2 }}>
+                        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <Chip size="small" label={`Artifact ID #${selectedEvent.id}`} sx={{ bgcolor: "#0d2b45", color: "#38bdf8", fontWeight: 700, fontFamily: "IBM Plex Mono" }} />
+                            <Chip size="small" label={selectedEvent.source_type} sx={{ bgcolor: sourceColor(selectedEvent.source_type), color: "#fff", fontWeight: 700 }} />
+                            <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "#f8fafc" }}>
+                              {selectedEvent.event_type}
+                            </Typography>
+                          </Stack>
+                          <Button size="small" onClick={() => setSelectedEvent(null)} sx={{ color: "#94a3b8", fontSize: 11, minWidth: "auto", p: 0.5 }}>
+                            Close
+                          </Button>
+                        </Stack>
+                        <Typography variant="body2" sx={{ color: "#e2e8f0", mb: 1, fontSize: 13, lineHeight: 1.5 }}>
+                          {selectedEvent.description}
+                        </Typography>
+                        <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ fontSize: 11, color: "#94a3b8" }}>
+                          <span>Time: <code style={{ color: "#38bdf8" }}>{selectedEvent.timestamp}</code></span>
+                          {selectedEvent.actor && <span>Actor: <code style={{ color: "#cbd5e1" }}>{selectedEvent.actor}</code></span>}
+                          {selectedEvent.process && <span>Process: <code style={{ color: "#cbd5e1" }}>{selectedEvent.process}</code></span>}
+                          {selectedEvent.target && <span>Target: <code style={{ color: "#cbd5e1" }}>{selectedEvent.target}</code></span>}
+                          {selectedEvent.source && <span>Source: <code style={{ color: "#a7f3d0" }}>{selectedEvent.source}</code></span>}
+                          {selectedEvent.evidence_hash && <span>SHA-256: <code style={{ color: "#fde68a" }}>{selectedEvent.evidence_hash.slice(0, 16)}...</code></span>}
+                        </Stack>
+                      </Paper>
+                    )}
 
                     {/* Filter & Search Bar */}
                     <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems="center" sx={{ mb: 2 }}>
