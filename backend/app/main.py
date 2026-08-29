@@ -63,10 +63,11 @@ class GeneratorMetadata(BaseModel):
     type: str
     provider: str
     model: Optional[str] = None
+    mode: Optional[str] = None
     fallback: bool
     verified: bool = False
-    mode: Optional[str] = None
     reason: Optional[str] = None
+    provenance_id: Optional[str] = None
     request_id: Optional[str] = None
     generated_at: Optional[str] = None
 

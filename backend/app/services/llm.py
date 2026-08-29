@@ -42,7 +42,7 @@ MANDATORY FORENSIC GROUNDING RULES:
 3. AUTHENTICATION VS UNAUTHORIZED ACCESS: Valid-account authentication (Event ID 4624) proves authentication occurred, but DOES NOT by itself establish unauthorized access or account compromise.
 4. NETWORK ACTIVITY VS EXFILTRATION: Observed network traffic / browser requests (e.g. over HTTPS/443) indicate communication, but DO NOT establish data exfiltration or malicious intent without corroborated staging/copying evidence.
 5. UNCERTAINTY & GAPS: If evidence for an action (e.g. USB transfer, file copy, exfiltration) is not present, explicitly state that it is NOT ESTABLISHED or INSUFFICIENT EVIDENCE. Do not extrapolate beyond facts.
-6. HYPOTHESES: Clearly label ATT&CK mappings (such as T1567, T1052.001) as HYPOTHESES requiring examiner verification.
+6. ATT&CK MAPPINGS & HYPOTHESES: MITRE ATT&CK technique labels (e.g. T1567, T1052.001, T1078) are analytical classifications, NOT established facts. Any ATT&CK mapping represents an analytical hypothesis requiring examiner verification and does not by itself establish that the technique succeeded or occurred maliciously.
 7. GENERAL KNOWLEDGE: General technical explanations are interpretive context only and cannot be used as case evidence.
 8. DISCLAIMERS: Always uphold the principle that AI is an investigative assistant, not an evidence source."""
 
@@ -250,10 +250,11 @@ def generate_chat_response(
                 "type": "assistant",
                 "provider": "dfis_assistant",
                 "model": model,
+                "mode": "local_assistant_guidance",
                 "fallback": False,
                 "verified": True,
-                "mode": "Local Assistant Guidance",
                 "reason": None,
+                "provenance_id": req_id,
                 "request_id": req_id,
                 "generated_at": gen_time,
             },
@@ -290,10 +291,11 @@ def generate_chat_response(
                 "type": "llm",
                 "provider": "ollama",
                 "model": model,
+                "mode": "local_neural_inference",
                 "fallback": False,
                 "verified": True,
-                "mode": "Local Neural Inference",
                 "reason": None,
+                "provenance_id": req_id,
                 "request_id": req_id,
                 "generated_at": gen_time,
             },
@@ -313,10 +315,11 @@ def generate_chat_response(
             "type": "fallback",
             "provider": "dfis_grounded_engine",
             "model": None,
+            "mode": "deterministic_grounded_fallback",
             "fallback": True,
             "verified": False,
-            "mode": "Rule/Template-Based Grounded Engine",
-            "reason": ollama_error or "Ollama service unavailable on port 11434",
+            "reason": ollama_error or "ollama_unreachable",
+            "provenance_id": req_id,
             "request_id": req_id,
             "generated_at": gen_time,
         },
