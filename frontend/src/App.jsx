@@ -1627,35 +1627,58 @@ function ForensicConsoleAnswer({ answer, generator, viewMode, setViewMode }) {
   }
 
   // Parse sections
-  const lines = cleanText.split("\n").map((l) => l.trim()).filter(Boolean);
+  const rawLines = cleanText.split("\n").map((l) => l.trim()).filter(Boolean);
   const observedItems = [];
+  const stateMatrixItems = [];
   const gapItems = [];
-  const interpretationItems = [];
   const bodyParagraphs = [];
+  
+  let hypothesisTitle = "";
+  let interpretationStatus = "";
+  let interpretationConfidence = "";
+  let interpretationPriority = "";
+  let interpretationEvidence = "";
+  let interpretationNarratives = [];
 
   let currentSection = "body";
-  for (const line of lines) {
+  for (const line of rawLines) {
     const lUpper = line.toUpperCase();
-    if (lUpper.startsWith("CASE EVIDENCE") || lUpper.startsWith("OBSERVED EVIDENCE") || lUpper.startsWith("EVIDENTIARY STATE BREAKDOWN:")) {
+    if (lUpper.startsWith("OBSERVED EVIDENCE:") || lUpper.startsWith("CASE EVIDENCE") || lUpper.startsWith("OBSERVED EVIDENCE")) {
       currentSection = "evidence";
+      continue;
+    } else if (lUpper.startsWith("EVIDENTIARY STATE BREAKDOWN:")) {
+      currentSection = "states";
       continue;
     } else if (lUpper.startsWith("MISSING EVIDENCE") || lUpper.startsWith("EVIDENCE GAPS") || lUpper.startsWith("EVIDENCE GAP")) {
       currentSection = "gaps";
       continue;
-    } else if (lUpper.startsWith("INTERPRETATION") || lUpper.startsWith("INVESTIGATIVE INTERPRETATION") || lUpper.startsWith("CONCLUSION:")) {
+    } else if (lUpper.startsWith("INVESTIGATIVE INTERPRETATION:") || lUpper.startsWith("INTERPRETATION") || lUpper.startsWith("INVESTIGATIVE INTERPRETATION")) {
       currentSection = "interpretation";
-      if (!lUpper.startsWith("INTERPRETATION") && !lUpper.startsWith("INVESTIGATIVE INTERPRETATION")) {
-        interpretationItems.push(line);
-      }
       continue;
     }
 
     if (currentSection === "evidence") {
       observedItems.push(line.replace(/^[-\u2022\u2713*]\s*/, ""));
+    } else if (currentSection === "states") {
+      stateMatrixItems.push(line.replace(/^[-\u2022*]\s*/, ""));
     } else if (currentSection === "gaps") {
       gapItems.push(line.replace(/^[-\u2022?*]\s*/, ""));
     } else if (currentSection === "interpretation") {
-      interpretationItems.push(line.replace(/^[-\u2022*]\s*/, ""));
+      if (lUpper.startsWith("HYPOTHESIS:") || lUpper.startsWith("POSSIBLE REMOVABLE-MEDIA")) {
+        hypothesisTitle = line.replace(/^Hypothesis:\s*/i, "");
+      } else if (lUpper.startsWith("STATUS:")) {
+        interpretationStatus = line.replace(/^Status:\s*/i, "");
+      } else if (lUpper.startsWith("CONFIDENCE:")) {
+        interpretationConfidence = line.replace(/^Confidence:\s*/i, "");
+      } else if (lUpper.startsWith("INVESTIGATION PRIORITY:") || lUpper.startsWith("PRIORITY:")) {
+        interpretationPriority = line.replace(/^(Investigation )?Priority:\s*/i, "");
+      } else if (lUpper.startsWith("SUPPORTING EVIDENCE") || lUpper.startsWith("SUPPORTING EVIDENCE IDS:")) {
+        interpretationEvidence = line.replace(/^Supporting [Ee]vidence( IDs)?:\s*/i, "");
+      } else if (lUpper.startsWith("ASSESSMENT:") || lUpper.startsWith("NARRATIVE:") || lUpper.startsWith("CONCLUSION:")) {
+        interpretationNarratives.push(line.replace(/^(Assessment|Narrative|Conclusion):\s*/i, ""));
+      } else {
+        interpretationNarratives.push(line);
+      }
     } else {
       if (!line.startsWith("Question:") && !line.startsWith("Working classification:") && !line.startsWith("Investigation Priority:")) {
         bodyParagraphs.push(line);
@@ -1664,8 +1687,9 @@ function ForensicConsoleAnswer({ answer, generator, viewMode, setViewMode }) {
   }
 
   const highlightEvidence = (text) => {
-    // Highlight Evidence IDs e.g. Evidence ID [5, 6] or [Evidence IDs: 26, 29] or [5, 6, 11]
-    const parts = text.split(/(Evidence\s+IDs?:\s*\[?[0-9,\s]+\]?|evidence_ids=\[?[0-9,\s]+\]?|\[Evidence\s+IDs?:\s*[0-9,\s]+\])/gi);
+    if (!text) return null;
+    const str = String(text);
+    const parts = str.split(/(Evidence\s+IDs?:\s*\[?[0-9,\s]+\]?|evidence_ids=\[?[0-9,\s]+\]?|\[Evidence\s+IDs?:\s*[0-9,\s]+\])/gi);
     return parts.map((part, idx) => {
       if (/Evidence\s+IDs?|evidence_ids/i.test(part)) {
         return (
@@ -1766,7 +1790,7 @@ function ForensicConsoleAnswer({ answer, generator, viewMode, setViewMode }) {
             </Paper>
           </Box>
 
-          {/* Section 2: Observed Evidence */}
+          {/* Section 2: Observed Case Evidence */}
           {observedItems.length > 0 && (
             <Box>
               <Typography variant="caption" sx={{ color: "#34d399", fontWeight: 800, letterSpacing: 0.8, textTransform: "uppercase", display: "block", mb: 0.8 }}>
@@ -1796,7 +1820,43 @@ function ForensicConsoleAnswer({ answer, generator, viewMode, setViewMode }) {
             </Box>
           )}
 
-          {/* Section 3: Evidence Gaps */}
+          {/* Section 3: Evidentiary State Breakdown */}
+          {stateMatrixItems.length > 0 && (
+            <Box>
+              <Typography variant="caption" sx={{ color: "#81d4fa", fontWeight: 800, letterSpacing: 0.8, textTransform: "uppercase", display: "block", mb: 0.8 }}>
+                Evidentiary State Breakdown
+              </Typography>
+              <Stack spacing={0.6}>
+                {stateMatrixItems.map((st, idx) => {
+                  const parts = st.split(":");
+                  const finding = parts[0] ? parts[0].trim() : st;
+                  const stateDesc = parts.slice(1).join(":").trim();
+                  return (
+                    <Paper
+                      key={idx}
+                      sx={{
+                        p: 0.8,
+                        px: 1.2,
+                        bgcolor: "#061826",
+                        border: "1px solid #102d42",
+                        borderRadius: 1,
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <Typography variant="body2" sx={{ color: "#cfd8dc", fontSize: 12, fontWeight: 600 }}>
+                        {finding}
+                      </Typography>
+                      {stateDesc && <EvidenceStatusBadge status={stateDesc} />}
+                    </Paper>
+                  );
+                })}
+              </Stack>
+            </Box>
+          )}
+
+          {/* Section 4: Evidence Gaps & Unverified Aspects */}
           {gapItems.length > 0 && (
             <Box>
               <Typography variant="caption" sx={{ color: "#fbbf24", fontWeight: 800, letterSpacing: 0.8, textTransform: "uppercase", display: "block", mb: 0.8 }}>
@@ -1826,21 +1886,67 @@ function ForensicConsoleAnswer({ answer, generator, viewMode, setViewMode }) {
             </Box>
           )}
 
-          {/* Section 4: Investigative Interpretation */}
-          {interpretationItems.length > 0 && (
+          {/* Section 5: Enhanced Investigative Interpretation & ATT&CK Analysis */}
+          {(hypothesisTitle || interpretationNarratives.length > 0 || interpretationStatus) && (
             <Box>
-              <Typography variant="caption" sx={{ color: "#94a3b8", fontWeight: 800, letterSpacing: 0.8, textTransform: "uppercase", display: "block", mb: 0.8 }}>
-                Investigative Interpretation
+              <Typography variant="caption" sx={{ color: "#38bdf8", fontWeight: 800, letterSpacing: 0.8, textTransform: "uppercase", display: "block", mb: 0.8 }}>
+                Investigative Interpretation & ATT&CK Analysis
               </Typography>
-              <Paper sx={{ p: 1.2, bgcolor: "#081522", border: "1px solid #14283b", borderRadius: 1.5 }}>
-                <Typography variant="body2" sx={{ color: "#cbd5e1", fontSize: 12, lineHeight: 1.5 }}>
-                  {highlightEvidence(interpretationItems.join("\n\n"))}
-                </Typography>
+              <Paper sx={{ p: 1.8, bgcolor: "#051829", border: "1px solid #0369a1", borderRadius: 1.8, boxShadow: "0 0 10px rgba(2, 136, 209, 0.08)" }}>
+                <Stack spacing={1.2}>
+                  {hypothesisTitle && (
+                    <Typography variant="subtitle2" sx={{ color: "#38bdf8", fontWeight: 700, fontSize: 13 }}>
+                      {hypothesisTitle}
+                    </Typography>
+                  )}
+
+                  {/* Metadata Badges Row */}
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ my: 0.5 }}>
+                    {interpretationStatus && (
+                      <Chip
+                        size="small"
+                        label={`Status: ${interpretationStatus}`}
+                        sx={{ bgcolor: "#1e293b", color: "#fde68a", border: "1px solid #d97706", fontWeight: 700, fontSize: 10.5 }}
+                      />
+                    )}
+                    {interpretationConfidence && (
+                      <Chip
+                        size="small"
+                        label={`Confidence: ${interpretationConfidence}`}
+                        sx={{ bgcolor: "#112a45", color: "#7dd3fc", border: "1px solid #0288d1", fontWeight: 700, fontSize: 10.5 }}
+                      />
+                    )}
+                    {interpretationPriority && (
+                      <Chip
+                        size="small"
+                        label={`Priority: ${interpretationPriority}`}
+                        sx={{ bgcolor: "#271704", color: "#f59e0b", border: "1px solid #b45309", fontWeight: 700, fontSize: 10.5 }}
+                      />
+                    )}
+                  </Stack>
+
+                  {/* Narrative paragraphs */}
+                  {interpretationNarratives.length > 0 && (
+                    <Box sx={{ mt: 0.8, p: 1.2, bgcolor: "#07131e", border: "1px solid #0f2c44", borderRadius: 1.2 }}>
+                      {interpretationNarratives.map((n, i) => (
+                        <Typography key={i} variant="body2" sx={{ color: "#e2e8f0", fontSize: 12.5, lineHeight: 1.6, mb: i < interpretationNarratives.length - 1 ? 1 : 0 }}>
+                          {highlightEvidence(n)}
+                        </Typography>
+                      ))}
+                    </Box>
+                  )}
+
+                  {interpretationEvidence && (
+                    <Typography variant="caption" sx={{ color: "#94a3b8", fontSize: 11, display: "block", mt: 0.5 }}>
+                      Supporting Evidence: {highlightEvidence(interpretationEvidence)}
+                    </Typography>
+                  )}
+                </Stack>
               </Paper>
             </Box>
           )}
 
-          {/* Section 5: Forensic Notice */}
+          {/* Section 6: Forensic Notice */}
           <Paper sx={{ p: 1.2, bgcolor: "#030a12", border: "1px solid #0f2334", borderRadius: 1.2 }}>
             <Typography variant="caption" sx={{ color: "#64748b", fontSize: 11, display: "block", lineHeight: 1.4 }}>
               <b>AI INVESTIGATION NOTICE:</b> {disclaimer}

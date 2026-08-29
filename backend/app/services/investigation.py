@@ -818,11 +818,11 @@ def _usb_transfer_answer(inv: dict, events: list[dict]) -> str | None:
         ent = g.get("entity") or ""
         destg = g.get("destination") or ""
         if g.get("family") == "usb_connect":
-            ev_lines.append(f"  {ts}  USB/removable media connected  evidence_ids={g.get('source_event_ids')}")
+            ev_lines.append(f"  ✓ {ts}  USB/removable media connected  evidence_ids={g.get('source_event_ids')}")
         elif g.get("family") == "file_access":
-            ev_lines.append(f"  {ts}  {ent} accessed  evidence_ids={g.get('source_event_ids')}")
+            ev_lines.append(f"  ✓ {ts}  {ent} accessed  evidence_ids={g.get('source_event_ids')}")
         elif g.get("family") == "file_copy":
-            ev_lines.append(f"  {ts}  {ent} → {destg or dest}  evidence_ids={g.get('source_event_ids')}")
+            ev_lines.append(f"  ✓ {ts}  {ent} → {destg or dest}  evidence_ids={g.get('source_event_ids')}")
 
     support = []
     for ids in (usb_ids, access_ids, copy_ids):
@@ -830,41 +830,36 @@ def _usb_transfer_answer(inv: dict, events: list[dict]) -> str | None:
     support = list(dict.fromkeys(support))
     score = inv.get("risk_score")
     pri = inv.get("priority") or (inv.get("risk") or {}).get("priority") or "HIGH PRIORITY"
+    drive_label = dest.split(':')[0] + ':' if ':' in dest else dest
 
     return "\n".join(
         [
             "Grounded assessment: NOT ESTABLISHED from currently available evidence (Hypothesis only).",
             "",
-            "CASE evidence",
+            "The currently available evidence does not establish that confidential data was copied to the connected USB device.",
+            "",
+            "OBSERVED EVIDENCE:",
             *ev_lines,
             "",
-            "Interpretation",
-            "  Possible removable-media transfer hypothesis. NOT ESTABLISHED from currently available evidence.",
-            "  Confidence: Medium",
-            "  Status: Hypothesized (temporal correlation, not device identity)",
-            "",
-            "Evidentiary State Breakdown:",
+            "EVIDENTIARY STATE BREAKDOWN:",
             "  - USB connection: OBSERVED (Security Event 6416 / Registry USBSTOR)",
             "  - Sensitive file access: OBSERVED (Security Event 4663 / Filesystem OPEN)",
             "  - File copy to transfer path: OBSERVED (Filesystem COPY)",
             "  - Drive-to-device identity mapping: NOT ESTABLISHED (Requires examiner verification)",
             "  - Exfiltration to USB: NOT ESTABLISHED",
             "",
-            "Missing evidence",
-            "  No direct drive-letter-to-USB-device mapping shown",
-            "  No explicit USB file-write event shown",
-            "  No cryptographic/hash confirmation of copied files shown",
+            "EVIDENCE GAPS & UNVERIFIED ASPECTS:",
+            "  ? No direct drive-letter-to-USB-device mapping shown in available evidence",
+            "  ? No explicit USB file-write event recorded",
+            "  ? No cryptographic/hash confirmation of copied files",
             "",
-            f"The case shows that a removable device was connected and that confidential data was copied to {dest}. "
-            f"However, the currently available evidence does not establish that drive {dest.split(':')[0] + ':' if ':' in dest else dest} "
-            f"belonged to the connected removable device.\n\n"
-            f"Therefore, the available evidence does not establish that the confidential data was copied to the USB device. "
-            f"A possible temporal relationship exists, but the removable-media transfer remains a hypothesis pending examiner verification of drive-to-device mapping.",
-            "",
-            "Conclusion: USB-based confidential-data transfer is NOT ESTABLISHED by the currently ingested evidence. Removable-media transfer is an unverified hypothesis pending drive-to-device mapping.",
-            "Confidence: Medium",
-            f"Supporting evidence: {support}",
-            f"Investigation Priority: {score}/100 — {pri}",
+            "INVESTIGATIVE INTERPRETATION:",
+            "  Hypothesis: Possible Removable-Media Data Transfer (T1052.001)",
+            "  Status: HYPOTHESIZED (Temporal correlation only; physical device destination unproven)",
+            "  Confidence: Medium",
+            f"  Investigation Priority: {score}/100 — {pri}",
+            f"  Supporting Evidence IDs: {support}",
+            f"  Assessment: The case shows that a removable device was connected and that confidential data was copied to {dest}. However, the currently available evidence does not establish that drive {drive_label} belonged to the connected removable device. Therefore, removable-media data transfer is an unverified hypothesis pending examiner verification of drive-to-device mapping.",
         ]
     )
 
