@@ -194,6 +194,25 @@ def post_process_llm_answer(raw_answer: str, query_type: str) -> str:
     """Ensure grounded disclaimers and clean formatting on local LLM outputs."""
     answer = raw_answer.strip()
 
+    # Strip internal bracketed prompt markers if echoed by the neural model
+    prompt_markers = [
+        r"\[RESPONSE GENERATION\]",
+        r"\[USER QUESTION ANSWER\]",
+        r"\[AUTHORITATIVE CASE STATE CITATION\]",
+        r"\[FORENSIC KNOWLEDGE BASE CITATION\]",
+        r"\[INVESTIGATION QUERY INTENT CITATION\]",
+        r"\[INVESTIGATION QUERY INTENT\]",
+        r"\[USER QUESTION\]",
+        r"\[FORENSIC GROUNDING RULES CITATION\]",
+        r"\[FORENSIC GROUNDING RULES\]",
+        r"\[MANDATORY FORENSIC GROUNDING RULES\]",
+    ]
+    for pattern in prompt_markers:
+        answer = re.sub(pattern, "", answer, flags=re.IGNORECASE)
+
+    # Clean double blank lines
+    answer = re.sub(r"\n{3,}", "\n\n", answer).strip()
+
     # For greetings, ensure no case dumping
     if query_type == "greeting":
         if "Working classification:" in answer or "Investigation Priority:" in answer:
