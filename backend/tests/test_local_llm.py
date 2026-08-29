@@ -186,9 +186,13 @@ def test_generate_chat_response_with_mocked_ollama(test_case_state, test_events)
         assert res["is_local"] is True
         assert res["llm_mode"] == "local_neural_inference"
         assert res["model"] == "llama3.2:3b"
-        assert "Ollama" in res["provider"]
+        assert res["provider"].lower() == "ollama"
         assert "USB connection is NOT ESTABLISHED" in res["answer"]
         assert "AI is an investigative assistant, not an evidence source." in res["answer"]
+        assert res["generator"]["fallback"] is False
+        assert res["generator"]["verified"] is True
+        assert res["generator"]["type"] == "llm"
+        assert res["generator"]["provider"] == "ollama"
 
 
 def test_api_chat_endpoint_returns_local_llm_metadata(db_session):
@@ -211,6 +215,8 @@ def test_api_chat_endpoint_returns_local_llm_metadata(db_session):
         assert "answer" in data
         assert "llama3.2:3b" in data["model"]
         assert data["is_local"] is True
+        assert "generator" in data
+        assert isinstance(data["generator"]["fallback"], bool)
         assert "Hypertext Transfer Protocol Secure" in data["answer"]
     finally:
         app.dependency_overrides.pop(get_db, None)

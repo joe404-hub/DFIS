@@ -59,6 +59,16 @@ class ChatIn(BaseModel):
     temperature: float = 0.1
 
 
+class GeneratorMetadata(BaseModel):
+    type: str
+    provider: str
+    model: Optional[str] = None
+    fallback: bool
+    verified: bool = False
+    mode: Optional[str] = None
+    reason: Optional[str] = None
+
+
 class LLMConfigIn(BaseModel):
     model: str = "llama3.2:3b"
     base_url: str = "http://localhost:11434"
@@ -623,10 +633,17 @@ def chat(case_id: int, body: ChatIn, db: Session = Depends(get_db)):
     return {
         "answer": chat_res.get("answer"),
         "model": chat_res.get("model", "llama3.2:3b"),
-        "provider": chat_res.get("provider", "Ollama (llama3.2:3b Local LLM)"),
+        "provider": chat_res.get("provider", "ollama"),
         "llm_mode": chat_res.get("llm_mode"),
         "is_local": True,
         "query_type": chat_res.get("query_type"),
+        "generator": chat_res.get("generator", {
+            "type": "fallback",
+            "provider": "dfis_grounded_engine",
+            "model": None,
+            "fallback": True,
+            "verified": False,
+        }),
         "rag": analysis.get("rag") or rag,
         "category": analysis.get("category"),
         "investigation": {

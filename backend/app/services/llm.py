@@ -217,13 +217,14 @@ def generate_chat_response(
     temperature: float = DEFAULT_TEMPERATURE,
     timeout: float = DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
-    """Execute complete Local LLM query with fallback to deterministic grounded engine.
+    """Execute complete Local LLM query with explicit generation metadata & provenance.
     
     Guarantees:
     - 100% local execution
+    - Clear provenance metadata distinguishing neural completions vs fallback
     - Never calls online/external chatbots
-    - If Ollama daemon is active, uses llama3.2:3b local neural reasoning
-    - If Ollama daemon is starting/offline, uses deterministic forensic engine
+    - If Ollama daemon is active, uses llama3.2:3b local neural reasoning (verified=True, fallback=False)
+    - If Ollama daemon is starting/offline, uses deterministic forensic engine (verified=False, fallback=True)
     - Enforces 4-tier evidentiary state consistency and grounding invariants
     """
     from app.services.investigation import answer_question, classify_user_query
@@ -236,42 +237,76 @@ def generate_chat_response(
         return {
             "answer": answer,
             "model": model,
-            "provider": "llama3.2:3b (local forensic assistant)",
+            "provider": "dfis_assistant",
             "llm_mode": "local_greeting",
             "is_local": True,
             "query_type": q_type,
+            "generator": {
+                "type": "assistant",
+                "provider": "dfis_assistant",
+                "model": model,
+                "fallback": False,
+                "verified": True,
+                "mode": "Local Assistant Guidance",
+                "reason": None,
+            },
         }
 
     # 2. Build local LLM prompt
     messages = build_forensic_prompt(question, q_type, events, inv, rag)
 
     # 3. Attempt local inference via Ollama
-    local_output = query_ollama(
-        messages=messages,
-        model=model,
-        base_url=base_url,
-        temperature=temperature,
-        timeout=timeout,
-    )
+    local_output = None
+    ollama_error = None
+    try:
+        local_output = query_ollama(
+            messages=messages,
+            model=model,
+            base_url=base_url,
+            temperature=temperature,
+            timeout=timeout,
+        )
+    except Exception as exc:
+        ollama_error = str(exc)
+        logger.warning("Ollama generation error: %s", exc)
 
     if local_output:
         processed_answer = post_process_llm_answer(local_output, q_type)
         return {
             "answer": processed_answer,
             "model": model,
-            "provider": "Ollama (llama3.2:3b Local LLM)",
+            "provider": "ollama",
             "llm_mode": "local_neural_inference",
             "is_local": True,
             "query_type": q_type,
+            "generator": {
+                "type": "llm",
+                "provider": "ollama",
+                "model": model,
+                "fallback": False,
+                "verified": True,
+                "mode": "Local Neural Inference",
+                "reason": None,
+            },
         }
 
     # 4. Fallback to Local Deterministic Grounded Reasoning Engine
+    logger.info("Ollama unavailable or unverified. Using DFIS grounded fallback engine.")
     fallback_answer = answer_question(question, rag, events, inv)
     return {
         "answer": fallback_answer,
         "model": f"{model} (Offline Grounded Local Engine)",
-        "provider": "DFIS Local Grounded Inference Engine",
+        "provider": "dfis_grounded_engine",
         "llm_mode": "local_grounded_engine",
         "is_local": True,
         "query_type": q_type,
+        "generator": {
+            "type": "fallback",
+            "provider": "dfis_grounded_engine",
+            "model": None,
+            "fallback": True,
+            "verified": False,
+            "mode": "Rule/Template-Based Grounded Engine",
+            "reason": ollama_error or "Ollama service unavailable on port 11434",
+        },
     }
