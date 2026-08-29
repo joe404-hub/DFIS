@@ -1,5 +1,15 @@
 import hashlib
+import logging
 import math
+import os
+
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
+os.environ["CHROMA_ANONYMIZED_TELEMETRY"] = "False"
+
+# Suppress chromadb telemetry signature mismatch noise
+logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
+logging.getLogger("chromadb.telemetry.posthog").setLevel(logging.CRITICAL)
+
 from app.db import CHROMA_DIR
 from app.services.knowledge import FORENSIC_KB
 
@@ -32,8 +42,9 @@ def _get_client():
     global _client
     if _client is None:
         import chromadb
+        from chromadb.config import Settings
 
-        _client = chromadb.PersistentClient(path=CHROMA_DIR)
+        _client = chromadb.PersistentClient(path=CHROMA_DIR, settings=Settings(anonymized_telemetry=False))
     return _client
 
 

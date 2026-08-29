@@ -49,6 +49,10 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import WarningIcon from "@mui/icons-material/Warning";
 import FingerprintIcon from "@mui/icons-material/Fingerprint";
 import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
+import SmartToyIcon from "@mui/icons-material/SmartToy";
+import LockIcon from "@mui/icons-material/Lock";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import SettingsIcon from "@mui/icons-material/Settings";
 import { DataSet } from "vis-data";
 import { Timeline } from "vis-timeline/standalone";
 import { Network } from "vis-network/standalone";
@@ -68,6 +72,14 @@ export default function App() {
   const [tab, setTab] = useState(0);
   const [q, setQ] = useState("Was any confidential file copied to USB?");
   const [answer, setAnswer] = useState("");
+  const [answerMeta, setAnswerMeta] = useState(null);
+  const [llmStatus, setLlmStatus] = useState(null);
+  const [llmModal, setLlmModal] = useState(false);
+  const [llmConfig, setLlmConfig] = useState({
+    model: "llama3.2:3b",
+    base_url: "http://localhost:11434",
+    temperature: 0.1,
+  });
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const [ingestModal, setIngestModal] = useState(null);
@@ -131,8 +143,18 @@ export default function App() {
     }
   };
 
+  const loadLlmStatus = async () => {
+    try {
+      const res = await api("/api/llm/status").then((x) => x.json());
+      setLlmStatus(res);
+    } catch {
+      setLlmStatus({ connected: false, model: "llama3.2:3b", mode: "offline_grounded_fallback" });
+    }
+  };
+
   useEffect(() => {
     loadCases();
+    loadLlmStatus();
   }, []);
 
   useEffect(() => {
@@ -232,14 +254,28 @@ export default function App() {
 
   const ask = async (customQ) => {
     const questionText = customQ || q;
+    if (!questionText || !questionText.trim()) return;
     setBusy(true);
     try {
       const r = await api(`/api/cases/${active}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: questionText }),
+        body: JSON.stringify({
+          question: questionText,
+          model: llmConfig.model,
+          temperature: llmConfig.temperature,
+        }),
       }).then((x) => x.json());
       setAnswer(r.answer);
+      setAnswerMeta({
+        model: r.model || "llama3.2:3b",
+        provider: r.provider || "Ollama (Local LLM)",
+        llm_mode: r.llm_mode,
+        is_local: r.is_local,
+        query_type: r.query_type,
+      });
+    } catch (err) {
+      alert("Chat request failed: " + err);
     } finally {
       setBusy(false);
     }
@@ -295,7 +331,22 @@ export default function App() {
             </Typography>
           </Box>
           <Box sx={{ flex: 1 }} />
-          <Stack direction="row" spacing={1.5}>
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <Chip
+              icon={<SmartToyIcon sx={{ fontSize: "15px !important", color: "#81d4fa" }} />}
+              label="Local LLM: llama3.2:3b"
+              size="small"
+              onClick={() => setLlmModal(true)}
+              sx={{
+                bgcolor: "#0b253a",
+                color: "#81d4fa",
+                border: "1px solid #0288d1",
+                fontWeight: 700,
+                fontSize: 12,
+                cursor: "pointer",
+                "&:hover": { bgcolor: "#103652" },
+              }}
+            />
             <Button variant="outlined" size="small" sx={{ borderColor: "#28455e" }} onClick={() => setOpen(true)}>
               + New Case
             </Button>
@@ -929,14 +980,29 @@ export default function App() {
                 )}
               </Paper>
 
-              {/* Right Sidebar: Forensic LLM + Case RAG Assistant */}
+              {/* Right Sidebar: Local LLM (llama3.2:3b) + Case RAG Assistant */}
               <Paper sx={{ flex: 1, minWidth: 320, p: 2.5, bgcolor: "#0a1926", border: "1px solid #162b3d", borderRadius: 2 }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 700, color: "#81d4fa", display: "flex", alignItems: "center", gap: 1 }}>
-                  <SecurityIcon fontSize="small" /> Case RAG + Forensic LLM
-                </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Typography variant="subtitle1" sx={{ fontWeight: 700, color: "#81d4fa", display: "flex", alignItems: "center", gap: 1 }}>
+                    <SmartToyIcon fontSize="small" sx={{ color: "#29b6f6" }} /> Local LLM (llama3.2:3b)
+                  </Typography>
+                  <IconButton size="small" onClick={() => setLlmModal(true)} title="Local LLM Settings & Health" sx={{ color: "#90a4ae" }}>
+                    <SettingsIcon fontSize="small" />
+                  </IconButton>
+                </Stack>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
                   Grounded Q&A: cross-references general forensic principles against this case’s ingested events.
                 </Typography>
+
+                {/* Local Air-Gapped Guarantee Badge */}
+                <Paper sx={{ p: 1, mb: 1.5, bgcolor: "#06131f", border: "1px solid #13334c", borderRadius: 1.5 }}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <LockIcon sx={{ fontSize: 15, color: "#4caf50" }} />
+                    <Typography variant="caption" sx={{ color: "#b0bec5", fontSize: 11, lineHeight: 1.3 }}>
+                      <b>100% Local Inference:</b> Running <code>llama3.2:3b</code> locally via Ollama / Air-Gapped Engine. Zero case data leaves this machine.
+                    </Typography>
+                  </Stack>
+                </Paper>
 
                 {/* Dynamic Suggested Queries from Evidentiary Gaps */}
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: "uppercase" }}>
@@ -973,7 +1039,7 @@ export default function App() {
                   minRows={2}
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="Ask a question about this case..."
+                  placeholder="Ask a question about this case (e.g. Was USB connected? What is 10.0.0.20:443?)..."
                   size="small"
                   sx={{ bgcolor: "#08131d", borderRadius: 1 }}
                 />
@@ -982,17 +1048,44 @@ export default function App() {
                   fullWidth
                   variant="contained"
                   color="primary"
+                  startIcon={<SmartToyIcon />}
                   onClick={() => ask()}
                   disabled={busy}
                 >
-                  Retrieve & Answer
+                  Ask Local LLM (llama3.2:3b)
                 </Button>
 
                 {answer && (
                   <Paper sx={{ mt: 2, p: 2, bgcolor: "#07131e", border: "1px solid #0288d1", borderRadius: 1.5 }}>
-                    <Typography variant="caption" sx={{ color: "#4fc3f7", fontWeight: 700, display: "block", mb: 0.5 }}>
-                      Forensic Grounded Answer:
-                    </Typography>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1, pb: 0.8, borderBottom: "1px solid #102a3d" }}>
+                      <Stack direction="row" spacing={0.8} alignItems="center">
+                        <Chip
+                          size="small"
+                          icon={<SmartToyIcon sx={{ fontSize: "12px !important", color: "#4fc3f7" }} />}
+                          label={answerMeta?.model || "llama3.2:3b (Local)"}
+                          sx={{ height: 22, fontSize: 10, fontWeight: 700, bgcolor: "#0b2840", color: "#4fc3f7" }}
+                        />
+                        <Chip
+                          size="small"
+                          label={answerMeta?.is_local ? "Air-Gapped Local" : "Offline"}
+                          color="success"
+                          variant="outlined"
+                          sx={{ height: 20, fontSize: 9, fontWeight: 700 }}
+                        />
+                      </Stack>
+                      <Button
+                        size="small"
+                        variant="text"
+                        startIcon={<ContentCopyIcon sx={{ fontSize: 13 }} />}
+                        onClick={() => {
+                          navigator.clipboard?.writeText(answer);
+                          alert("Forensic answer copied to clipboard!");
+                        }}
+                        sx={{ fontSize: 11, color: "#90a4ae", textTransform: "none", py: 0 }}
+                      >
+                        Copy
+                      </Button>
+                    </Stack>
                     <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", fontSize: 13, color: "#e0f2f1", lineHeight: 1.5 }}>
                       {answer}
                     </Typography>
@@ -1262,6 +1355,66 @@ export default function App() {
         <DialogActions sx={{ bgcolor: "#091724" }}>
           <Button onClick={() => setOpen(false)}>Cancel</Button>
           <Button onClick={createCase} variant="contained">Create</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Local LLM (llama3.2:3b) Configuration & Status Dialog */}
+      <Dialog open={llmModal} onClose={() => setLlmModal(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ bgcolor: "#091724", color: "#4fc3f7", fontWeight: 700, display: "flex", alignItems: "center", gap: 1 }}>
+          <SmartToyIcon /> Local LLM Configuration (llama3.2:3b)
+        </DialogTitle>
+        <DialogContent sx={{ bgcolor: "#060d14", color: "#cfd8dc", pt: 2 }}>
+          <Typography variant="body2" sx={{ color: "#b0bec5", mb: 2 }}>
+            DFIS utilizes a 100% local, air-gapped Large Language Model (<b>llama3.2:3b</b>) to assist examiners with evidence analysis and grounded Q&A. No data is sent to external or cloud chatbot services.
+          </Typography>
+
+          <Paper sx={{ p: 2, bgcolor: "#081420", border: "1px solid #142a3e", borderRadius: 1.5, mb: 2 }}>
+            <Typography variant="caption" sx={{ color: "#81d4fa", fontWeight: 700, textTransform: "uppercase", display: "block", mb: 1 }}>
+              Inference Engine Status
+            </Typography>
+            <Stack spacing={1}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Typography variant="body2" sx={{ color: "#90a4ae" }}>Active Model:</Typography>
+                <Chip size="small" label={llmConfig.model} sx={{ bgcolor: "#0f2e47", color: "#4fc3f7", fontWeight: 700 }} />
+              </Stack>
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Typography variant="body2" sx={{ color: "#90a4ae" }}>Inference Provider:</Typography>
+                <Typography variant="body2" sx={{ color: "#e0f2f1", fontWeight: 600 }}>Ollama / Air-Gapped Reasoner</Typography>
+              </Stack>
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Typography variant="body2" sx={{ color: "#90a4ae" }}>Local Endpoint:</Typography>
+                <Typography variant="body2" sx={{ color: "#81d4fa", fontFamily: "IBM Plex Mono" }}>{llmConfig.base_url}</Typography>
+              </Stack>
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Typography variant="body2" sx={{ color: "#90a4ae" }}>Inference Mode:</Typography>
+                <Chip
+                  size="small"
+                  label={llmStatus?.connected ? "Ollama Connected (Local)" : "Offline Grounded Reasoner"}
+                  color={llmStatus?.connected ? "success" : "warning"}
+                  sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
+                />
+              </Stack>
+            </Stack>
+          </Paper>
+
+          <Paper sx={{ p: 2, bgcolor: "#081420", border: "1px solid #142a3e", borderRadius: 1.5, mb: 2 }}>
+            <Typography variant="caption" sx={{ color: "#81d4fa", fontWeight: 700, textTransform: "uppercase", display: "block", mb: 1 }}>
+              Quickstart: Running llama3.2:3b Locally
+            </Typography>
+            <Typography variant="caption" sx={{ color: "#b0bec5", display: "block", mb: 1 }}>
+              To enable live neural completions with Ollama on your forensic workstation:
+            </Typography>
+            <Paper sx={{ p: 1, bgcolor: "#03080d", border: "1px solid #0d2133", fontFamily: "IBM Plex Mono", fontSize: 12, color: "#4fc3f7" }}>
+              ollama run llama3.2:3b
+            </Paper>
+          </Paper>
+
+          <Typography variant="caption" sx={{ color: "#78909c", display: "block" }}>
+            <b>Forensic Guarantee:</b> AI is an investigative assistant, not an evidence source. All hypotheses and citations are strictly cross-checked against original SHA-256 evidence IDs.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ bgcolor: "#091724" }}>
+          <Button onClick={() => setLlmModal(false)} variant="contained">Close</Button>
         </DialogActions>
       </Dialog>
     </Box>

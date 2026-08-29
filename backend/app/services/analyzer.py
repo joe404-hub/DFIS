@@ -30,3 +30,24 @@ def analyze_timeline(events: list[dict], case_id: int | None = None) -> dict[str
 def answer_question(question: str, rag: dict, events: list[dict], analysis: dict) -> str:
     """Produce grounded examiner Q&A answers citing case evidence and uncertainty bounds."""
     return answer_from_investigation(question, events, {**analysis, "rag": rag or analysis.get("rag") or {}})
+
+
+def answer_question_llm(
+    question: str,
+    rag: dict,
+    events: list[dict],
+    analysis: dict,
+    model: str = "llama3.2:3b",
+    temperature: float = 0.1,
+) -> dict[str, Any]:
+    """Execute complete Local LLM query with fallback to deterministic grounded engine."""
+    from app.services.llm import generate_chat_response
+
+    return generate_chat_response(
+        question=question,
+        events=events,
+        inv=analysis,
+        rag=rag or analysis.get("rag") or {},
+        model=model,
+        temperature=temperature,
+    )

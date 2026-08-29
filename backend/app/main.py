@@ -26,6 +26,7 @@ from app.services.analyzer import analyze_timeline, answer_question
 from app.services.detector import detect_file_type
 from app.services.ingestion import EvidenceIngestionEngine, IngestionSummary
 from app.services.integrity import sha256_file
+from app.services.llm import check_local_llm_health, generate_chat_response
 from app.services.parsers import classify_skipped, parse_file
 from app.services.rag import index_case_events, knowledge_collection, retrieve
 from app.services.report import generate_report
@@ -54,6 +55,15 @@ class CaseIn(BaseModel):
 
 class ChatIn(BaseModel):
     question: str
+    model: str = "llama3.2:3b"
+    temperature: float = 0.1
+
+
+class LLMConfigIn(BaseModel):
+    model: str = "llama3.2:3b"
+    base_url: str = "http://localhost:11434"
+    temperature: float = 0.1
+    timeout: float = 20.0
 
 
 class RecStatusIn(BaseModel):
@@ -583,6 +593,18 @@ def investigation(case_id: int, db: Session = Depends(get_db)):
     return analyze_timeline([_art_to_dict(a) for a in arts], case_id=c.id)
 
 
+@app.get("/api/llm/status")
+def llm_status():
+    """Return status and configuration for the local LLM (llama3.2:3b)."""
+    return check_local_llm_health()
+
+
+@app.post("/api/llm/config")
+def set_llm_config(body: LLMConfigIn):
+    """Test and update configuration for the local LLM instance."""
+    return check_local_llm_health(base_url=body.base_url, model=body.model)
+
+
 @app.post("/api/cases/{case_id}/chat")
 def chat(case_id: int, body: ChatIn, db: Session = Depends(get_db)):
     c = _case_or_404(db, case_id)
@@ -590,9 +612,21 @@ def chat(case_id: int, body: ChatIn, db: Session = Depends(get_db)):
     events = [_art_to_dict(a) for a in arts]
     rag = retrieve(case_id, body.question)
     analysis = analyze_timeline(events, case_id=case_id)
-    text = answer_question(body.question, rag, events, analysis)
+    chat_res = generate_chat_response(
+        question=body.question,
+        events=events,
+        inv=analysis,
+        rag=rag,
+        model=body.model or "llama3.2:3b",
+        temperature=body.temperature if body.temperature is not None else 0.1,
+    )
     return {
-        "answer": text,
+        "answer": chat_res.get("answer"),
+        "model": chat_res.get("model", "llama3.2:3b"),
+        "provider": chat_res.get("provider", "Ollama (llama3.2:3b Local LLM)"),
+        "llm_mode": chat_res.get("llm_mode"),
+        "is_local": True,
+        "query_type": chat_res.get("query_type"),
         "rag": analysis.get("rag") or rag,
         "category": analysis.get("category"),
         "investigation": {
