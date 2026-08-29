@@ -833,13 +833,13 @@ def _usb_transfer_answer(inv: dict, events: list[dict]) -> str | None:
 
     return "\n".join(
         [
-            "Grounded assessment: Possible, but not conclusively established.",
+            "Grounded assessment: NOT ESTABLISHED from currently available evidence (Hypothesis only).",
             "",
             "CASE evidence",
             *ev_lines,
             "",
             "Interpretation",
-            "  Possible removable-media data transfer",
+            "  Possible removable-media transfer hypothesis. NOT ESTABLISHED from currently available evidence.",
             "  Confidence: Medium",
             "  Status: Hypothesized (temporal correlation, not device identity)",
             "",
@@ -848,19 +848,20 @@ def _usb_transfer_answer(inv: dict, events: list[dict]) -> str | None:
             "  - Sensitive file access: OBSERVED (Security Event 4663 / Filesystem OPEN)",
             "  - File copy to transfer path: OBSERVED (Filesystem COPY)",
             "  - Drive-to-device identity mapping: NOT ESTABLISHED (Requires examiner verification)",
+            "  - Exfiltration to USB: NOT ESTABLISHED",
             "",
             "Missing evidence",
             "  No direct drive-letter-to-USB-device mapping shown",
             "  No explicit USB file-write event shown",
             "  No cryptographic/hash confirmation of copied files shown",
             "",
-            f"The case shows that a removable device was connected and that confidential files "
-            f"were subsequently copied to {dest}. This sequence is consistent with a possible "
-            f"transfer to removable media. However, the available evidence does not directly "
-            f"establish that {dest} corresponds to the USB device that was connected. "
-            "Further verification of the drive/device mapping is required.",
+            f"The case shows that a removable device was connected and that confidential data was copied to {dest}. "
+            f"However, the currently available evidence does not establish that drive {dest.split(':')[0] + ':' if ':' in dest else dest} "
+            f"belonged to the connected removable device.\n\n"
+            f"Therefore, the available evidence does not establish that the confidential data was copied to the USB device. "
+            f"A possible temporal relationship exists, but the removable-media transfer remains a hypothesis pending examiner verification of drive-to-device mapping.",
             "",
-            "Conclusion: Possible USB/removable-media transfer; further verification of the drive/device mapping is required.",
+            "Conclusion: USB-based confidential-data transfer is NOT ESTABLISHED by the currently ingested evidence. Removable-media transfer is an unverified hypothesis pending drive-to-device mapping.",
             "Confidence: Medium",
             f"Supporting evidence: {support}",
             f"Investigation Priority: {score}/100 — {pri}",

@@ -20,6 +20,8 @@ import json
 import logging
 import os
 import re
+import uuid
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -222,6 +224,7 @@ def generate_chat_response(
     Guarantees:
     - 100% local execution
     - Clear provenance metadata distinguishing neural completions vs fallback
+    - Timestamps and unique Request IDs for cryptographic provenance tracking
     - Never calls online/external chatbots
     - If Ollama daemon is active, uses llama3.2:3b local neural reasoning (verified=True, fallback=False)
     - If Ollama daemon is starting/offline, uses deterministic forensic engine (verified=False, fallback=True)
@@ -230,6 +233,8 @@ def generate_chat_response(
     from app.services.investigation import answer_question, classify_user_query
 
     q_type = classify_user_query(question)
+    req_id = f"chat-{uuid.uuid4().hex[:8]}"
+    gen_time = datetime.now().astimezone().isoformat()
 
     # 1. Check if greeting -> return structured greeting directly for instant crisp UX
     if q_type == "greeting":
@@ -249,6 +254,8 @@ def generate_chat_response(
                 "verified": True,
                 "mode": "Local Assistant Guidance",
                 "reason": None,
+                "request_id": req_id,
+                "generated_at": gen_time,
             },
         }
 
@@ -287,6 +294,8 @@ def generate_chat_response(
                 "verified": True,
                 "mode": "Local Neural Inference",
                 "reason": None,
+                "request_id": req_id,
+                "generated_at": gen_time,
             },
         }
 
@@ -308,5 +317,7 @@ def generate_chat_response(
             "verified": False,
             "mode": "Rule/Template-Based Grounded Engine",
             "reason": ollama_error or "Ollama service unavailable on port 11434",
+            "request_id": req_id,
+            "generated_at": gen_time,
         },
     }

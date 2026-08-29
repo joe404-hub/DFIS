@@ -1095,6 +1095,11 @@ export default function App() {
                               <Typography variant="caption" sx={{ color: "#a7f3d0", fontSize: 11, display: "block", mt: 0.2 }}>
                                 Model: <b>{generator.model || "llama3.2:3b"}</b> • Provider: Ollama • Mode: Local Neural Inference • Fallback: No
                               </Typography>
+                              {generator.request_id && (
+                                <Typography variant="caption" sx={{ color: "#6ee7b7", fontSize: 10, display: "block", mt: 0.2 }}>
+                                  Provenance ID: <code>{generator.request_id}</code> • Time: {generator.generated_at ? generator.generated_at.replace("T", " ").slice(0, 19) : ""}
+                                </Typography>
+                              )}
                             </Box>
                           </Stack>
                         ) : generator.type === "assistant" ? (
@@ -1107,6 +1112,11 @@ export default function App() {
                               <Typography variant="caption" sx={{ color: "#b3e5fc", fontSize: 11, display: "block" }}>
                                 Model: <b>llama3.2:3b</b> • Local Interactive Guidance
                               </Typography>
+                              {generator.request_id && (
+                                <Typography variant="caption" sx={{ color: "#81d4fa", fontSize: 10, display: "block", mt: 0.2 }}>
+                                  Provenance ID: <code>{generator.request_id}</code>
+                                </Typography>
+                              )}
                             </Box>
                           </Stack>
                         ) : (
@@ -1122,6 +1132,11 @@ export default function App() {
                               <Typography variant="caption" sx={{ color: "#fde68a", fontSize: 11, display: "block", mt: 0.2 }}>
                                 Provider: DFIS Grounded Engine • Reason: Ollama offline/unreachable • Mode: Rule/Template-Based Deterministic Fallback
                               </Typography>
+                              {generator.request_id && (
+                                <Typography variant="caption" sx={{ color: "#fbbf24", fontSize: 10, display: "block", mt: 0.2 }}>
+                                  Provenance ID: <code>{generator.request_id}</code> • Time: {generator.generated_at ? generator.generated_at.replace("T", " ").slice(0, 19) : ""}
+                                </Typography>
+                              )}
                             </Box>
                           </Stack>
                         )}

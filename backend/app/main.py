@@ -67,6 +67,8 @@ class GeneratorMetadata(BaseModel):
     verified: bool = False
     mode: Optional[str] = None
     reason: Optional[str] = None
+    request_id: Optional[str] = None
+    generated_at: Optional[str] = None
 
 
 class LLMConfigIn(BaseModel):
