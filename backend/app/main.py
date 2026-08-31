@@ -647,7 +647,7 @@ def chat(case_id: int, body: ChatIn, db: Session = Depends(get_db)):
     )
     return {
         "answer": chat_res.get("answer"),
-        "intent": chat_res.get("intent", "FORENSIC_CASE_ANALYSIS"),
+        "intent": chat_res.get("intent", "CASE_QUERY"),
         "model": chat_res.get("model", "llama3.2:3b"),
         "provider": chat_res.get("provider", "ollama"),
         "llm_mode": chat_res.get("llm_mode"),
@@ -663,6 +663,7 @@ def chat(case_id: int, body: ChatIn, db: Session = Depends(get_db)):
         "forensic_state": chat_res.get("forensic_state"),
         "generated_analysis": chat_res.get("generated_analysis"),
         "concept_data": chat_res.get("concept_data"),
+        "prompt_messages": chat_res.get("prompt_messages"),
         "rag": analysis.get("rag") or rag,
         "category": analysis.get("category"),
         "investigation": {

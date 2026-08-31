@@ -536,6 +536,7 @@ def generate_chat_response(
             "forensic_state": None,
             "generated_analysis": None,
             "concept_data": None,
+            "prompt_messages": messages,
             "generator": {
                 "type": "fallback",
                 "provider": "dfis_grounded_engine",
@@ -624,6 +625,7 @@ def generate_chat_response(
                     "context": [],
                     "rules": [],
                 },
+                "prompt_messages": messages,
                 "generator": {
                     "type": "fallback",
                     "provider": "dfis_grounded_engine",
@@ -651,6 +653,7 @@ def generate_chat_response(
                 "forensic_state": None,
                 "generated_analysis": None,
                 "concept_data": {"title": q_title, "definition": definition, "context": [], "rules": []},
+                "prompt_messages": messages,
                 "generator": {
                     "type": "fallback",
                     "provider": "dfis_grounded_engine",
@@ -762,6 +765,7 @@ def generate_chat_response(
         "forensic_state": forensic_state,
         "generated_analysis": fallback_analysis,
         "concept_data": None,
+        "prompt_messages": messages,
         "generator": {
             "type": "fallback",
             "provider": "dfis_grounded_engine",

@@ -67,6 +67,45 @@ import "vis-timeline/styles/vis-timeline-graph2d.css";
 
 const api = (path, opts) => fetch(path, opts).then((r) => (r.ok ? r : Promise.reject(r)));
 
+async function queryLocalOllamaFromBrowser(baseUrl, model, messages, temperature = 0.1) {
+  const cleanUrl = (baseUrl || "http://localhost:11434").replace(/\/+$/, "");
+  const candidates = [cleanUrl];
+  if (cleanUrl.includes("localhost")) {
+    candidates.push(cleanUrl.replace("localhost", "127.0.0.1"));
+  } else if (cleanUrl.includes("127.0.0.1")) {
+    candidates.push(cleanUrl.replace("127.0.0.1", "localhost"));
+  }
+
+  let lastError = null;
+  for (const url of candidates) {
+    try {
+      const resp = await fetch(`${url}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: model || "llama3.2:3b",
+          messages: messages,
+          stream: false,
+          options: {
+            temperature: temperature,
+          },
+        }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const content = data?.message?.content?.trim();
+        if (content) {
+          return { success: true, content, model: data.model || model, url };
+        }
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  return { success: false, error: lastError ? String(lastError) : "Failed to connect to local Ollama" };
+}
+
 export default function App() {
   const [cases, setCases] = useState([]);
   const [active, setActive] = useState(null);
@@ -318,17 +357,53 @@ export default function App() {
           temperature: llmConfig.temperature,
         }),
       }).then((x) => x.json());
-      setAnswer(r.answer);
-      setGenerator(r.generator || null);
+
+      let finalAnswer = r.answer;
+      let finalGenerator = r.generator || null;
+      let finalAnalysis = r.generated_analysis || null;
+
+      // If backend was unable to reach user's local Ollama from cloud, try direct browser bridge
+      if (r.generator?.fallback && r.prompt_messages && r.prompt_messages.length > 0) {
+        try {
+          const browserRes = await queryLocalOllamaFromBrowser(
+            llmConfig.base_url,
+            llmConfig.model,
+            r.prompt_messages,
+            llmConfig.temperature
+          );
+          if (browserRes.success && browserRes.content) {
+            finalAnswer = browserRes.content;
+            finalGenerator = {
+              type: "llm",
+              provider: "ollama",
+              model: browserRes.model || llmConfig.model,
+              mode: "local_browser_ollama_bridge",
+              fallback: false,
+              verified: true,
+              reason: null,
+              provenance_id: r.generator?.provenance_id || `chat-${Date.now().toString(16)}`,
+              request_id: r.generator?.request_id || `chat-${Date.now().toString(16)}`,
+              generated_at: new Date().toISOString(),
+            };
+            if (r.intent === "CASE_QUERY" && r.forensic_state) {
+              const parsedInterp = parseForensicAnswer(browserRes.content);
+              finalAnalysis = parsedInterp.interpretationData || r.generated_analysis;
+            }
+          }
+        } catch {}
+      }
+
+      setAnswer(finalAnswer);
+      setGenerator(finalGenerator);
       setAnswerMeta({
-        model: r.model || llmConfig.model,
-        provider: r.provider || "Ollama (Local LLM)",
-        llm_mode: r.llm_mode,
-        is_local: r.is_local,
+        model: finalGenerator?.model || r.model || llmConfig.model,
+        provider: finalGenerator?.provider || r.provider || "Ollama (Local LLM)",
+        llm_mode: finalGenerator?.mode || r.llm_mode,
+        is_local: true,
         query_type: r.query_type,
         intent: r.intent || (r.query_type === "general" ? "GENERAL" : r.query_type === "technical_forensic" ? "FORENSIC_KNOWLEDGE" : r.query_type === "case_guidance" ? "CASE_GUIDANCE" : "CASE_QUERY"),
         forensic_state: r.forensic_state || null,
-        generated_analysis: r.generated_analysis || null,
+        generated_analysis: finalAnalysis,
         concept_data: r.concept_data || null,
       });
     } catch (err) {
