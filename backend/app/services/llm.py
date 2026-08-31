@@ -44,15 +44,14 @@ Provide a clear, objective educational answer to the question asked."""
 
 TECHNICAL_FORENSIC_SYSTEM_PROMPT = """You are a digital forensics knowledge assistant.
 
-Provide a clear, authoritative explanation of the technical digital forensics concept, Windows artifact, network protocol, ATT&CK technique, or investigative methodology.
+Provide a concise, natural educational explanation of the forensic concept, artifact, or investigative methodology.
+Use clean headings and bullet points where helpful.
+Keep responses concise and suitable for a compact investigation panel (under 250 words).
+Avoid excessively long lists of file paths or registry keys unless specifically asked.
 
-Structure your answer with:
-1. Technical Explanation / Definition
-2. Forensic Significance & Artifact Locations (e.g., registry paths, event logs, headers)
-3. Examiner Methodology (how investigators analyze or detect it)
-
-Do NOT conclude that the activity occurred in a specific case unless explicitly asked.
-Always maintain the forensic principle: General forensic knowledge is interpretive only and cannot be presented as case evidence."""
+Do NOT use a rigid mandatory report template.
+Do NOT generate case assessments, observed evidence lists, evidence IDs, or case conclusions about the current case unless the user specifically asks about the loaded case.
+Maintain the forensic principle: General forensic knowledge provides investigative guidance and does not constitute evidence in a specific case."""
 
 FORENSIC_SYSTEM_PROMPT = """You are DFIS (Digital Forensics Investigation System) Assistant powered by the local LLM llama3.2:3b.
 You assist forensic investigators in analyzing evidence. You are an investigative assistant, NOT an evidence source.
@@ -409,6 +408,9 @@ def generate_chat_response(
     """
     from app.services.investigation import (
         INTENT_CASE_ANALYSIS,
+        INTENT_CASE_GUIDANCE,
+        INTENT_CASE_QUERY,
+        INTENT_FORENSIC_KNOWLEDGE,
         INTENT_GENERAL,
         INTENT_GREETING,
         INTENT_TECHNICAL_FORENSIC,
@@ -529,8 +531,8 @@ def generate_chat_response(
             },
         }
 
-    # 3. TECHNICAL FORENSIC KNOWLEDGE INTENT (e.g., "Event ID 4624", "USBSTOR", "How to detect suspicious activity?")
-    if intent == INTENT_TECHNICAL_FORENSIC:
+    # 3. FORENSIC KNOWLEDGE INTENT (e.g., "Event ID 4624", "USBSTOR", "How to detect suspicious activity?")
+    if intent in {INTENT_FORENSIC_KNOWLEDGE, INTENT_TECHNICAL_FORENSIC}:
         is_meth = any(k in question.lower() for k in METHODOLOGY_KEYWORDS)
         messages = [
             {"role": "system", "content": TECHNICAL_FORENSIC_SYSTEM_PROMPT},
@@ -555,19 +557,13 @@ def generate_chat_response(
                 clean_output = f"{clean_output}\n\nGeneral forensic knowledge is interpretive only and does not constitute evidence in the current case."
             return {
                 "answer": clean_output,
-                "intent": INTENT_TECHNICAL_FORENSIC,
+                "intent": INTENT_FORENSIC_KNOWLEDGE,
                 "query_type": "technical_forensic",
                 "model": model,
                 "provider": "ollama",
                 "llm_mode": "local_forensic_knowledge",
                 "is_local": True,
-                "forensic_state": {
-                    "assessment": {"status": "CONCEPT DEFINITION", "summary": clean_output},
-                    "observed_evidence": [],
-                    "unproven_findings": [],
-                    "evidence_gaps": [],
-                    "conclusion": {"status": "CONCEPT DEFINITION", "confidence": "High", "priority": "INFORMATIONAL", "summary": "Forensic knowledge response."},
-                },
+                "forensic_state": None,
                 "generated_analysis": None,
                 "concept_data": {
                     "title": question,
@@ -592,22 +588,16 @@ def generate_chat_response(
         # Offline fallback
         if is_meth:
             meth_text = get_forensic_methodology_response(question)
-            fallback_text = f"## Forensic Investigation Methodology\n\n{meth_text}\n\nGeneral forensic knowledge is interpretive only and does not constitute evidence in the current case.\nAI is an investigative assistant, not an evidence source."
+            fallback_text = f"{meth_text}\n\nGeneral forensic knowledge is interpretive only and does not constitute evidence in the current case."
             return {
                 "answer": fallback_text,
-                "intent": INTENT_TECHNICAL_FORENSIC,
+                "intent": INTENT_FORENSIC_KNOWLEDGE,
                 "query_type": "technical_forensic",
                 "model": f"{model} (Offline Grounded Local Engine)",
                 "provider": "dfis_grounded_engine",
                 "llm_mode": "local_forensic_knowledge",
                 "is_local": True,
-                "forensic_state": {
-                    "assessment": {"status": "CONCEPT DEFINITION", "summary": meth_text},
-                    "observed_evidence": [],
-                    "unproven_findings": [],
-                    "evidence_gaps": [],
-                    "conclusion": {"status": "CONCEPT DEFINITION", "confidence": "High", "priority": "INFORMATIONAL", "summary": "Forensic methodology guidance."},
-                },
+                "forensic_state": None,
                 "generated_analysis": None,
                 "concept_data": {
                     "title": question,
@@ -630,25 +620,18 @@ def generate_chat_response(
             }
         else:
             q_title, definition = get_concept_definition(question)
-            concept_data = {"title": q_title, "definition": definition, "context": [], "rules": []}
-            ans = f"## Concept Definition\n{definition}\n\nGeneral forensic knowledge is interpretive only and does not constitute evidence in the current case.\nAI is an investigative assistant, not an evidence source."
+            ans = f"### {q_title}\n\n{definition}\n\nGeneral forensic knowledge is interpretive only and does not constitute evidence in the current case."
             return {
                 "answer": ans,
-                "intent": INTENT_TECHNICAL_FORENSIC,
+                "intent": INTENT_FORENSIC_KNOWLEDGE,
                 "query_type": "technical_forensic",
                 "model": f"{model} (Offline Grounded Local Engine)",
                 "provider": "dfis_grounded_engine",
                 "llm_mode": "local_forensic_knowledge",
                 "is_local": True,
-                "forensic_state": {
-                    "assessment": {"status": "CONCEPT DEFINITION", "summary": definition},
-                    "observed_evidence": [],
-                    "unproven_findings": [],
-                    "evidence_gaps": [],
-                    "conclusion": {"status": "CONCEPT DEFINITION", "confidence": "High", "priority": "INFORMATIONAL", "summary": "Technical concept definition."},
-                },
+                "forensic_state": None,
                 "generated_analysis": None,
-                "concept_data": concept_data,
+                "concept_data": {"title": q_title, "definition": definition, "context": [], "rules": []},
                 "generator": {
                     "type": "fallback",
                     "provider": "dfis_grounded_engine",
@@ -663,7 +646,43 @@ def generate_chat_response(
                 },
             }
 
-    # 4. FORENSIC_CASE_ANALYSIS INTENT (Full DFIS Canonical State Engine)
+    # 4. CASE GUIDANCE INTENT (e.g. "What are the recommended next steps?", "How should we investigate this case?")
+    if intent == "CASE_GUIDANCE":
+        from app.services.actions import format_actions, recommend_actions
+        actions = inv.get("next_actions") or recommend_actions(events, inv.get("correlations") or [])
+        formatted_acts = format_actions(actions)
+        guidance_text = (
+            f"### Recommended Investigation Actions (Derived from Evidentiary Gaps)\n\n"
+            f"{formatted_acts}\n\n"
+            "All recommendations represent examiner verification steps. "
+            "AI is an investigative assistant, not an evidence source."
+        )
+        return {
+            "answer": guidance_text,
+            "intent": "CASE_GUIDANCE",
+            "query_type": "case_guidance",
+            "model": f"{model} (Local Forensic Assistant)",
+            "provider": "dfis_assistant",
+            "llm_mode": "local_case_guidance",
+            "is_local": True,
+            "forensic_state": None,
+            "generated_analysis": None,
+            "concept_data": None,
+            "generator": {
+                "type": "assistant",
+                "provider": "dfis_assistant",
+                "model": model,
+                "mode": "local_case_guidance",
+                "fallback": False,
+                "verified": True,
+                "reason": None,
+                "provenance_id": req_id,
+                "request_id": req_id,
+                "generated_at": gen_time,
+            },
+        }
+
+    # 5. CASE QUERY INTENT (Full DFIS Canonical State Engine)
     forensic_state = build_canonical_forensic_state(events, inv, question)
     fallback_analysis = generate_analysis_narrative(question, events, inv, forensic_state)
     messages = build_forensic_prompt(question, "case_investigation", events, inv, rag, forensic_state=forensic_state)
@@ -687,7 +706,7 @@ def generate_chat_response(
         answer = format_forensic_answer_markdown(forensic_state, llm_analysis)
         return {
             "answer": answer,
-            "intent": INTENT_CASE_ANALYSIS,
+            "intent": "CASE_QUERY",
             "query_type": "case_investigation",
             "model": model,
             "provider": "ollama",
@@ -715,7 +734,7 @@ def generate_chat_response(
     fallback_answer = format_forensic_answer_markdown(forensic_state, fallback_analysis)
     return {
         "answer": fallback_answer,
-        "intent": INTENT_CASE_ANALYSIS,
+        "intent": "CASE_QUERY",
         "query_type": "case_investigation",
         "model": f"{model} (Offline Grounded Local Engine)",
         "provider": "dfis_grounded_engine",

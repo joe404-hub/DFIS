@@ -361,10 +361,10 @@ def test_generate_chat_response_technical_forensic_methodology(test_case_state, 
         inv=test_case_state,
         rag={},
     )
-    assert res["intent"] == "TECHNICAL_FORENSIC"
+    assert res["intent"] in {"FORENSIC_KNOWLEDGE", "TECHNICAL_FORENSIC"}
     assert "Authentication" in res["answer"] or "Event ID 4624" in res["answer"]
     assert "Process Execution" in res["answer"] or "Prefetch" in res["answer"]
-    assert "General forensic knowledge is interpretive only" in res["answer"]
+    assert "General forensic knowledge" in res["answer"]
     # Does not dump the USB false verdict
     assert "The available evidence does not establish that any confidential file was copied to a USB device" not in res["answer"]
 

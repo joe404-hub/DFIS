@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Alert,
   AppBar,
@@ -2179,6 +2181,62 @@ function parseForensicAnswer(rawText) {
   };
 }
 
+function MarkdownView({ content, onFocusEvidence }) {
+  if (!content) return null;
+
+  return (
+    <Box
+      sx={{
+        color: "#e2e8f0",
+        fontSize: "13px",
+        lineHeight: 1.65,
+        "& h1, & h2, & h3, & h4": {
+          color: "#f8fafc",
+          fontWeight: 700,
+          mt: 1.4,
+          mb: 0.6,
+          lineHeight: 1.3,
+        },
+        "& h1": { fontSize: "15px" },
+        "& h2": { fontSize: "14px", color: "#38bdf8" },
+        "& h3": { fontSize: "13px", color: "#7dd3fc" },
+        "& p": { my: 0.6 },
+        "& ul, & ol": { my: 0.6, pl: 2.2 },
+        "& li": { my: 0.35, color: "#cbd5e1" },
+        "& strong": { color: "#f1f5f9", fontWeight: 700 },
+        "& code": {
+          bgcolor: "#081b2c",
+          border: "1px solid #0c4a6e",
+          color: "#38bdf8",
+          fontFamily: "IBM Plex Mono",
+          fontSize: "11.5px",
+          px: 0.6,
+          py: 0.1,
+          borderRadius: 0.8,
+        },
+        "& pre": {
+          bgcolor: "#040b12",
+          p: 1.2,
+          borderRadius: 1,
+          overflowX: "auto",
+          fontFamily: "IBM Plex Mono",
+          fontSize: "11.5px",
+        },
+        "& blockquote": {
+          borderLeft: "3px solid #0288d1",
+          pl: 1.2,
+          my: 0.8,
+          color: "#94a3b8",
+        },
+      }}
+    >
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        {content}
+      </ReactMarkdown>
+    </Box>
+  );
+}
+
 function ForensicConsoleAnswer({
   answer,
   generator,
@@ -2196,7 +2254,9 @@ function ForensicConsoleAnswer({
   const parsed = parseForensicAnswer(answer);
 
   const isGeneral = intent === "GENERAL";
+  const isCaseGuidance = intent === "CASE_GUIDANCE";
   const isTechnicalForensic =
+    intent === "FORENSIC_KNOWLEDGE" ||
     intent === "TECHNICAL_FORENSIC" ||
     Boolean(
       conceptData ||
@@ -2400,40 +2460,47 @@ function ForensicConsoleAnswer({
           </Typography>
         </Paper>
       ) : isGeneral ? (
-        /* Render Mode 1: Pure General AI Response */
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.6 }}>
+        /* Mode 1: Pure General Educational Response */
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.4 }}>
           <Paper sx={{ p: 2, bgcolor: "#091c2c", border: "1px solid #0369a1", borderRadius: 2 }}>
-            <Typography variant="overline" sx={{ color: "#38bdf8", fontWeight: 800, letterSpacing: "0.08em", fontSize: 10.5 }}>
-              EDUCATIONAL & TECHNICAL EXPLANATION
+            <Typography variant="overline" sx={{ color: "#38bdf8", fontWeight: 800, letterSpacing: "0.08em", fontSize: 10.5, display: "block", mb: 0.4 }}>
+              EDUCATIONAL EXPLANATION
             </Typography>
-            <Typography variant="body1" sx={{ color: "#f8fafc", fontSize: 13.5, lineHeight: 1.7, fontWeight: 400, whiteSpace: "pre-wrap", mt: 0.8 }}>
-              {answer}
-            </Typography>
+            <MarkdownView content={answer} onFocusEvidence={onFocusEvidence} />
           </Paper>
 
           <Paper sx={{ p: 1.2, bgcolor: "#040b12", border: "1px solid #0d2133", borderRadius: 1.2 }}>
             <Typography variant="caption" sx={{ color: "#64748b", fontSize: 11, display: "block" }}>
-              <b>AI NOTICE:</b> This is an educational response provided by the local language model. General technical knowledge is informational and does not constitute case evidence.
+              <b>AI NOTICE:</b> General technical knowledge is informational and does not constitute case evidence.
+            </Typography>
+          </Paper>
+        </Box>
+      ) : isCaseGuidance ? (
+        /* Mode 4: Case Guidance & Recommendations */
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.4 }}>
+          <Paper sx={{ p: 2, bgcolor: "#091c2c", border: "1px solid #059669", borderRadius: 2 }}>
+            <Typography variant="overline" sx={{ color: "#34d399", fontWeight: 800, letterSpacing: "0.08em", fontSize: 10.5, display: "block", mb: 0.4 }}>
+              RECOMMENDED INVESTIGATION ACTIONS
+            </Typography>
+            <MarkdownView content={answer} onFocusEvidence={onFocusEvidence} />
+          </Paper>
+
+          <Paper sx={{ p: 1.2, bgcolor: "#040b12", border: "1px solid #0d2133", borderRadius: 1.2 }}>
+            <Typography variant="caption" sx={{ color: "#64748b", fontSize: 11, display: "block" }}>
+              <b>EXAMINER GUIDANCE:</b> All recommendations represent examiner verification steps derived from case evidentiary gaps.
             </Typography>
           </Paper>
         </Box>
       ) : isTechnicalForensic ? (
-        /* Render Mode 2: Technical Forensic Knowledge Response */
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.6 }}>
-          {/* Concept Explanation Card */}
+        /* Mode 2: Technical Forensic Knowledge Response */
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.4 }}>
           <Paper sx={{ p: 2, bgcolor: "#091c2c", border: "1px solid #0288d1", borderRadius: 2 }}>
-            <Typography variant="overline" sx={{ color: "#64748b", fontWeight: 800, letterSpacing: "0.1em", fontSize: 10 }}>
+            <Typography variant="overline" sx={{ color: "#64748b", fontWeight: 800, letterSpacing: "0.1em", fontSize: 10, display: "block", mb: 0.4 }}>
               FORENSIC KNOWLEDGE & METHODOLOGY
             </Typography>
-            <Box sx={{ my: 0.8 }}>
-              <EvidenceStatusBadge status="CONCEPT DEFINITION" />
-            </Box>
-            <Typography variant="body1" sx={{ color: "#f8fafc", fontSize: 13.5, lineHeight: 1.65, fontWeight: 500, whiteSpace: "pre-wrap" }}>
-              {highlightEvidence(assessmentText || answer)}
-            </Typography>
+            <MarkdownView content={assessmentText || answer} onFocusEvidence={onFocusEvidence} />
           </Paper>
 
-          {/* Case-Specific Evidence Card */}
           {contextItems.length > 0 && (
             <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
               <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#34d399", fontSize: 11.5, textTransform: "uppercase", display: "block", mb: 1 }}>
@@ -2451,7 +2518,6 @@ function ForensicConsoleAnswer({
             </Box>
           )}
 
-          {/* Forensic Interpretation Rules Callouts */}
           {rulesItems.length > 0 && (
             <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
               <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#fbbf24", fontSize: 11.5, textTransform: "uppercase", display: "block", mb: 1 }}>
@@ -2477,7 +2543,6 @@ function ForensicConsoleAnswer({
             </Box>
           )}
 
-          {/* Disclaimer Footer */}
           <Paper sx={{ p: 1.2, bgcolor: "#040b12", border: "1px solid #0d2133", borderRadius: 1.2 }}>
             <Typography variant="caption" sx={{ color: "#64748b", fontSize: 11, display: "block" }}>
               <b>FORENSIC NOTICE:</b> {disclaimer}
@@ -2485,7 +2550,7 @@ function ForensicConsoleAnswer({
           </Paper>
         </Box>
       ) : (
-        /* Render Mode 3: Unified Case Investigation View */
+        /* Mode 3: Unified Case Investigation View */
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.6 }}>
           {/* Primary Assessment / Verdict Card */}
           <Paper

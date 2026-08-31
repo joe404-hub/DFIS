@@ -14,7 +14,10 @@ from app.services.investigation import (
     INTENT_GREETING,
     INTENT_GENERAL,
     INTENT_TECHNICAL_FORENSIC,
+    INTENT_FORENSIC_KNOWLEDGE,
     INTENT_CASE_ANALYSIS,
+    INTENT_CASE_GUIDANCE,
+    INTENT_CASE_QUERY,
 )
 
 
@@ -41,11 +44,11 @@ def test_query_classifier():
     assert classify_query_intent("What is T1078?") == INTENT_TECHNICAL_FORENSIC
     assert classify_query_intent("how could we find the suspicious activity taken place?") == INTENT_TECHNICAL_FORENSIC
 
-    # 4. Case Investigation queries
-    assert classify_query_intent("Was confidential data copied to USB?") == INTENT_CASE_ANALYSIS
-    assert classify_query_intent("Does the HTTPS activity in this case indicate exfiltration?") == INTENT_CASE_ANALYSIS
-    assert classify_query_intent("What was chrome.exe accessing in this case?") == INTENT_CASE_ANALYSIS
-    assert classify_query_intent("What are the recommended next steps?") == INTENT_CASE_ANALYSIS
+    # 4. Case Investigation & Guidance queries
+    assert classify_query_intent("Was confidential data copied to USB?") == INTENT_CASE_QUERY
+    assert classify_query_intent("Does the HTTPS activity in this case indicate exfiltration?") == INTENT_CASE_QUERY
+    assert classify_query_intent("What was chrome.exe accessing in this case?") == INTENT_CASE_QUERY
+    assert classify_query_intent("What are the recommended next steps?") == INTENT_CASE_GUIDANCE
 
 
 def test_general_https_response():

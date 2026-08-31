@@ -41,8 +41,13 @@ GREETING_REGEX = re.compile(
 
 INTENT_GREETING = "GREETING"
 INTENT_GENERAL = "GENERAL"
-INTENT_TECHNICAL_FORENSIC = "TECHNICAL_FORENSIC"
-INTENT_CASE_ANALYSIS = "FORENSIC_CASE_ANALYSIS"
+INTENT_FORENSIC_KNOWLEDGE = "FORENSIC_KNOWLEDGE"
+INTENT_CASE_GUIDANCE = "CASE_GUIDANCE"
+INTENT_CASE_QUERY = "CASE_QUERY"
+
+# Backward compatibility aliases
+INTENT_TECHNICAL_FORENSIC = "FORENSIC_KNOWLEDGE"
+INTENT_CASE_ANALYSIS = "CASE_QUERY"
 
 FORENSIC_TECHNICAL_CONCEPTS = [
     "pcap", "pcapng", "evtx", "event id", "event 4624", "event 4688", "event 7045",
@@ -54,18 +59,24 @@ FORENSIC_TECHNICAL_CONCEPTS = [
     "digital forensic", "forensic analysis", "forensic", "forensics", "usn journal"
 ]
 
-CASE_REFERENCE_KEYWORDS = [
+CASE_GUIDANCE_KEYWORDS = [
+    "next step", "next action", "what should we", "what should the examiner",
+    "recommend next", "recommended next", "investigate next", "investigation tasks",
+    "examiner verification steps", "how should we investigate this case",
+    "recommended actions", "verification steps", "what to do next"
+]
+
+CASE_QUERY_KEYWORDS = [
     "this case", "the case", "our case", "in the case", "in this case",
     "this incident", "the incident", "in this workstation", "workstation-14",
     "was confidential", "was any confidential", "was data copied", "was usb connected", "was file copied",
     "did the user", "did analyst", "did j.patel", "who accessed", "who logged in", "who performed",
     "at 09:", "at 10:", "at 11:", "around 09:", "between 09:", "09:00", "09:05", "09:14",
     "in our evidence", "in the evidence", "in current evidence", "ingested evidence",
-    "next step", "next action", "what should we", "recommend next", "investigate next", "tasks",
     "evidence #", "artifact #", "event #",
     "api_keys.env", "projectx", "sourcecode.zip", "sensitive_projectx",
-    "was there exfiltration in this case", "was anything exfiltrated in this case",
-    "indicate exfiltration in this case"
+    "was there exfiltration", "was anything exfiltrated", "exfiltrated in this case",
+    "indicate exfiltration in this case", "what was chrome.exe accessing in this case"
 ]
 
 METHODOLOGY_KEYWORDS = [
@@ -78,30 +89,32 @@ METHODOLOGY_KEYWORDS = [
 
 
 def classify_query_intent(question: str) -> str:
-    """Classify user query into 4 distinct intents: GREETING, GENERAL, TECHNICAL_FORENSIC, FORENSIC_CASE_ANALYSIS."""
+    """Classify user query into 5 distinct intents: GREETING, GENERAL, FORENSIC_KNOWLEDGE, CASE_GUIDANCE, CASE_QUERY."""
     q_stripped = question.strip()
     if GREETING_REGEX.match(q_stripped):
         return INTENT_GREETING
 
     q_low = q_stripped.lower()
 
-    # 1. Case-Specific Reference Check
-    if any(k in q_low for k in CASE_REFERENCE_KEYWORDS):
-        return INTENT_CASE_ANALYSIS
+    # 1. Case Guidance Check
+    if any(k in q_low for k in CASE_GUIDANCE_KEYWORDS):
+        return INTENT_CASE_GUIDANCE
 
-    # Case-specific file / action questions
+    # 2. Case Query Check
+    if any(k in q_low for k in CASE_QUERY_KEYWORDS):
+        return INTENT_CASE_QUERY
+
     if any(k in q_low for k in ["was confidential data", "was any confidential", "was data copied to usb", "was usb copied", "who accessed"]):
-        return INTENT_CASE_ANALYSIS
+        return INTENT_CASE_QUERY
 
-    # 2. General Forensic Methodology Check (e.g., "how could we find suspicious activity take place?")
+    # 3. Forensic Methodology & Knowledge Check
     if any(k in q_low for k in METHODOLOGY_KEYWORDS):
-        return INTENT_TECHNICAL_FORENSIC
+        return INTENT_FORENSIC_KNOWLEDGE
 
-    # 3. Technical Forensic Concept / Artifact Check
     if any(re.search(r"\b" + re.escape(c) + r"\b", q_low) for c in FORENSIC_TECHNICAL_CONCEPTS):
-        return INTENT_TECHNICAL_FORENSIC
+        return INTENT_FORENSIC_KNOWLEDGE
 
-    # 4. Pure General Educational / Technical Question Check (e.g., "What is HTTP?", "Explain cryptography", "What is AI?")
+    # 4. Pure General Educational / Technical Questions
     return INTENT_GENERAL
 
 
@@ -112,8 +125,10 @@ def classify_user_query(question: str) -> str:
         return "greeting"
     if intent == INTENT_GENERAL:
         return "general"
-    if intent == INTENT_TECHNICAL_FORENSIC:
+    if intent in {INTENT_FORENSIC_KNOWLEDGE, INTENT_TECHNICAL_FORENSIC}:
         return "technical_forensic"
+    if intent == INTENT_CASE_GUIDANCE:
+        return "case_guidance"
     return "case_investigation"
 
 
@@ -697,26 +712,27 @@ def get_general_concept_response(query: str) -> str:
 
 
 def get_forensic_methodology_response(query: str) -> str:
-    """Generate structured forensic methodology and detection guidance for technical questions."""
+    """Generate structured, concise forensic methodology and detection guidance."""
     return (
-        "To identify and investigate suspicious activity in digital forensic investigations, examiners follow a structured multi-source methodology:\n\n"
-        "### 1. Authentication & Account Activity Analysis\n"
-        "- Examine Windows Security Event Logs (Event ID 4624 for successful logons, Event ID 4625 for logon failures, Event ID 4672 for special privileges assigned).\n"
-        "- Identify unusual logon hours, suspicious logon types (e.g., Type 3 Network vs Type 10 RemoteInteractive), or unfamiliar user accounts.\n\n"
-        "### 2. Process Execution & Persistence Artifacts\n"
-        "- **Execution Tracking**: Inspect Windows Prefetch (.pf) files, Amcache.hve, and Shimcache (AppCompatCache) to confirm binary execution history and execution counts.\n"
-        "- **Scripting & Command Activity**: Review Process Creation events (Event ID 4688) with command-line logging enabled, and PowerShell Script Block logs (Event ID 4104).\n"
-        "- **Persistence Mechanisms**: Inspect registry Run keys (`HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run`), Windows Services (Event ID 7045), and Scheduled Tasks.\n\n"
-        "### 3. Filesystem & Staging Activity\n"
-        "- Analyze the NTFS Master File Table ($MFT) Standard Information and File Name timestamps to detect file staging, rename operations, or timestomping.\n"
-        "- Inspect User RecentDocs, Jump Lists, and Shellbags to verify user interaction with confidential documents and folders.\n\n"
-        "### 4. Removable Storage & External Devices\n"
-        "- Inspect the SYSTEM registry hive (`CurrentControlSet\\Enum\\USBSTOR` and `USB`) to identify connected USB serial numbers, vendors, and device IDs.\n"
-        "- Correlate with Security Event 6416 (`A new external device was recognized by the system`) and device setup logs (`setupapi.dev.log`).\n\n"
-        "### 5. Network & Exfiltration Inspection\n"
-        "- Examine DNS query logs, TCP/UDP connection flows, browser history (SQLite), and proxy records for connections to unknown external IP addresses, cloud storage, or file-sharing services.\n\n"
-        "### 6. Unified Timeline Correlation\n"
-        "- Correlate all timestamps in UTC across disparate log sources to construct an unbroken chronological sequence of events and identify temporal gaps."
+        "### How to Identify Suspicious Activity in Digital Forensics\n\n"
+        "To identify suspicious activity during an investigation, examiners correlate evidence across multiple log sources:\n\n"
+        "1. **Review Authentication Activity**\n"
+        "   - Look for unusual successful logons (Security Event 4624) or repeated failures (Event 4625).\n"
+        "   - Check for logons outside standard business hours or use of unexpected accounts.\n\n"
+        "2. **Examine Process Execution**\n"
+        "   - Inspect Process Creation events (Event 4688) for unfamiliar executables or abnormal parent-child trees.\n"
+        "   - Review PowerShell script block logs (Event 4104) and Windows Prefetch (`.pf`) execution counts.\n\n"
+        "3. **Analyze Network & Web Activity**\n"
+        "   - Identify unexpected outbound connections, unusual port usage, and DNS requests to newly registered domains.\n"
+        "   - Correlate browser history with access to cloud storage or file-transfer endpoints.\n\n"
+        "4. **Review Filesystem & Staging Activity**\n"
+        "   - Check NTFS Master File Table ($MFT) and RecentDocs for access to sensitive archives and confidential folders.\n"
+        "   - Inspect staging directory creation (e.g., `.zip`, `.7z` archives in temporary folders).\n\n"
+        "5. **Examine Removable Storage & Persistence**\n"
+        "   - Correlate USB connection events (Event 6416 / Registry USBSTOR) with file-system copy timestamps.\n"
+        "   - Inspect registry Run keys, new Windows services (Event 7045), and scheduled tasks for persistence.\n\n"
+        "6. **Construct a Unified Timeline**\n"
+        "   - Correlate all timestamps in UTC to reconstruct the chronological chain of events and verify evidence gaps."
     )
 
 
