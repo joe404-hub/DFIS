@@ -311,6 +311,7 @@ export default function App() {
         llm_mode: r.llm_mode,
         is_local: r.is_local,
         query_type: r.query_type,
+        intent: r.intent || (r.query_type === "general" ? "GENERAL" : r.query_type === "technical_forensic" ? "TECHNICAL_FORENSIC" : "FORENSIC_CASE_ANALYSIS"),
         forensic_state: r.forensic_state || null,
         generated_analysis: r.generated_analysis || null,
         concept_data: r.concept_data || null,
@@ -1238,6 +1239,7 @@ export default function App() {
                       answer={answer}
                       generator={generator}
                       inv={inv}
+                      intent={answerMeta?.intent}
                       forensicState={answerMeta?.forensic_state}
                       generatedAnalysis={answerMeta?.generated_analysis}
                       conceptData={answerMeta?.concept_data}
@@ -2181,6 +2183,7 @@ function ForensicConsoleAnswer({
   answer,
   generator,
   inv,
+  intent,
   forensicState,
   generatedAnalysis,
   conceptData,
@@ -2192,12 +2195,15 @@ function ForensicConsoleAnswer({
 
   const parsed = parseForensicAnswer(answer);
 
-  const isConcept = Boolean(
-    conceptData ||
-    forensicState?.assessment?.status === "CONCEPT DEFINITION" ||
-    forensicState?.conclusion?.status === "CONCEPT DEFINITION" ||
-    parsed.isConcept
-  );
+  const isGeneral = intent === "GENERAL";
+  const isTechnicalForensic =
+    intent === "TECHNICAL_FORENSIC" ||
+    Boolean(
+      conceptData ||
+      forensicState?.assessment?.status === "CONCEPT DEFINITION" ||
+      forensicState?.conclusion?.status === "CONCEPT DEFINITION" ||
+      parsed.isConcept
+    );
 
   const assessmentText =
     forensicState?.assessment?.summary ||
@@ -2208,7 +2214,7 @@ function ForensicConsoleAnswer({
   const assessmentState =
     forensicState?.assessment?.status?.replace(/_/g, " ") ||
     parsed.assessmentState ||
-    (isConcept ? "CONCEPT DEFINITION" : "NOT ESTABLISHED");
+    (isTechnicalForensic ? "CONCEPT DEFINITION" : "NOT ESTABLISHED");
 
   const observedItems =
     forensicState?.observed_evidence && forensicState.observed_evidence.length > 0
@@ -2393,19 +2399,37 @@ function ForensicConsoleAnswer({
             {answer}
           </Typography>
         </Paper>
-      ) : isConcept ? (
-        /* Render Technical Concept View */
+      ) : isGeneral ? (
+        /* Render Mode 1: Pure General AI Response */
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.6 }}>
+          <Paper sx={{ p: 2, bgcolor: "#091c2c", border: "1px solid #0369a1", borderRadius: 2 }}>
+            <Typography variant="overline" sx={{ color: "#38bdf8", fontWeight: 800, letterSpacing: "0.08em", fontSize: 10.5 }}>
+              EDUCATIONAL & TECHNICAL EXPLANATION
+            </Typography>
+            <Typography variant="body1" sx={{ color: "#f8fafc", fontSize: 13.5, lineHeight: 1.7, fontWeight: 400, whiteSpace: "pre-wrap", mt: 0.8 }}>
+              {answer}
+            </Typography>
+          </Paper>
+
+          <Paper sx={{ p: 1.2, bgcolor: "#040b12", border: "1px solid #0d2133", borderRadius: 1.2 }}>
+            <Typography variant="caption" sx={{ color: "#64748b", fontSize: 11, display: "block" }}>
+              <b>AI NOTICE:</b> This is an educational response provided by the local language model. General technical knowledge is informational and does not constitute case evidence.
+            </Typography>
+          </Paper>
+        </Box>
+      ) : isTechnicalForensic ? (
+        /* Render Mode 2: Technical Forensic Knowledge Response */
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.6 }}>
           {/* Concept Explanation Card */}
           <Paper sx={{ p: 2, bgcolor: "#091c2c", border: "1px solid #0288d1", borderRadius: 2 }}>
             <Typography variant="overline" sx={{ color: "#64748b", fontWeight: 800, letterSpacing: "0.1em", fontSize: 10 }}>
-              TECHNICAL DEFINITION
+              FORENSIC KNOWLEDGE & METHODOLOGY
             </Typography>
             <Box sx={{ my: 0.8 }}>
               <EvidenceStatusBadge status="CONCEPT DEFINITION" />
             </Box>
             <Typography variant="body1" sx={{ color: "#f8fafc", fontSize: 13.5, lineHeight: 1.65, fontWeight: 500, whiteSpace: "pre-wrap" }}>
-              {highlightEvidence(assessmentText)}
+              {highlightEvidence(assessmentText || answer)}
             </Typography>
           </Paper>
 
@@ -2456,12 +2480,12 @@ function ForensicConsoleAnswer({
           {/* Disclaimer Footer */}
           <Paper sx={{ p: 1.2, bgcolor: "#040b12", border: "1px solid #0d2133", borderRadius: 1.2 }}>
             <Typography variant="caption" sx={{ color: "#64748b", fontSize: 11, display: "block" }}>
-              <b>AI INVESTIGATION NOTICE:</b> {disclaimer}
+              <b>FORENSIC NOTICE:</b> {disclaimer}
             </Typography>
           </Paper>
         </Box>
       ) : (
-        /* Render Unified Case Investigation View */
+        /* Render Mode 3: Unified Case Investigation View */
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.6 }}>
           {/* Primary Assessment / Verdict Card */}
           <Paper

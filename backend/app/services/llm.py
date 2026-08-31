@@ -33,6 +33,27 @@ DEFAULT_OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 DEFAULT_TIMEOUT = float(os.environ.get("DFIS_LLM_TIMEOUT", "20.0"))
 DEFAULT_TEMPERATURE = float(os.environ.get("DFIS_LLM_TEMPERATURE", "0.1"))
 
+GENERAL_SYSTEM_PROMPT = """You are a helpful, knowledgeable technical assistant.
+
+Answer the user's question directly, clearly, and educationally.
+Explain concepts in a structured, concise, and easy-to-understand manner.
+
+Do NOT use forensic investigation case templates (do not generate Forensic Assessment, Observed Case Evidence, Not Established Findings, Evidence Gaps, or Case Conclusion).
+Do NOT invent case evidence, workstation names, or investigative verdicts.
+Provide a clear, objective educational answer to the question asked."""
+
+TECHNICAL_FORENSIC_SYSTEM_PROMPT = """You are a digital forensics knowledge assistant.
+
+Provide a clear, authoritative explanation of the technical digital forensics concept, Windows artifact, network protocol, ATT&CK technique, or investigative methodology.
+
+Structure your answer with:
+1. Technical Explanation / Definition
+2. Forensic Significance & Artifact Locations (e.g., registry paths, event logs, headers)
+3. Examiner Methodology (how investigators analyze or detect it)
+
+Do NOT conclude that the activity occurred in a specific case unless explicitly asked.
+Always maintain the forensic principle: General forensic knowledge is interpretive only and cannot be presented as case evidence."""
+
 FORENSIC_SYSTEM_PROMPT = """You are DFIS (Digital Forensics Investigation System) Assistant powered by the local LLM llama3.2:3b.
 You assist forensic investigators in analyzing evidence. You are an investigative assistant, NOT an evidence source.
 
@@ -51,11 +72,6 @@ FORMATTING & PRESENTATION RULES:
 - Do not escape Markdown characters (do not output \\*\\* or \\*). Output clean standard Markdown only (use headings ##, bold **, bullet points -).
 - Do not output empty bullet points, trailing asterisks (*), or malformed markdown headers.
 - Put each section heading on its own line.
-- For technical concepts, use clean visible headings:
-  ## Concept Definition
-  ## Case-Specific Context
-  ## Forensic Interpretation Rules
-  ## Forensic Notice
 - For case investigation questions, use clean visible headings:
   ## Forensic Assessment
   ## Observed Case Evidence
@@ -382,38 +398,48 @@ def generate_chat_response(
     temperature: float = DEFAULT_TEMPERATURE,
     timeout: float = DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
-    """Execute complete Local LLM query with explicit generation metadata & provenance.
+    """Execute complete Local LLM query with explicit intent classification and generation metadata.
     
     Guarantees:
     - 100% local execution.
-    - Rule 1: One canonical evidence classifier.
-    - Rule 2: Both LLM and Fallback consume and output the exact same forensic_state.
-    - Rule 3: Deduplicate forensic findings into unified findings.
-    - Timestamps and unique Request IDs for cryptographic provenance tracking.
+    - Intent-based routing: GENERAL, TECHNICAL_FORENSIC, FORENSIC_CASE_ANALYSIS, GREETING.
+    - General questions get clean educational responses without forensic templates.
+    - Technical forensic questions get concept explanations with forensic notices.
+    - Case investigation queries get canonical forensic state with evidence citations.
     """
     from app.services.investigation import (
+        INTENT_CASE_ANALYSIS,
+        INTENT_GENERAL,
+        INTENT_GREETING,
+        INTENT_TECHNICAL_FORENSIC,
+        METHODOLOGY_KEYWORDS,
         answer_question,
         build_canonical_forensic_state,
+        classify_query_intent,
         classify_user_query,
         format_forensic_answer_markdown,
         generate_analysis_narrative,
         get_concept_definition,
+        get_forensic_methodology_response,
+        get_general_concept_response,
     )
 
+    intent = classify_query_intent(question)
     q_type = classify_user_query(question)
     req_id = f"chat-{uuid.uuid4().hex[:8]}"
     gen_time = datetime.now().astimezone().isoformat()
 
-    # 1. Check if greeting -> return structured greeting directly for instant crisp UX
-    if q_type == "greeting":
+    # 1. GREETING INTENT
+    if intent == INTENT_GREETING:
         answer = answer_question(question, rag, events, inv)
         return {
             "answer": answer,
+            "intent": INTENT_GREETING,
+            "query_type": "greeting",
             "model": model,
             "provider": "dfis_assistant",
             "llm_mode": "local_greeting",
             "is_local": True,
-            "query_type": q_type,
             "forensic_state": None,
             "generated_analysis": None,
             "concept_data": None,
@@ -431,95 +457,217 @@ def generate_chat_response(
             },
         }
 
-    # 2. Check if general concept or hybrid query
-    if q_type in {"general", "hybrid"}:
-        q_title, definition = get_concept_definition(question)
-        q_low = question.lower()
-        
-        relevant_events = []
-        if "https" in q_low or "http" in q_low or "tls" in q_low or "443" in q_low:
-            relevant_events = [e for e in events if e.get("source_type") in {"network", "browser"}]
-        elif "t1078" in q_low or "logon" in q_low or "auth" in q_low:
-            relevant_events = [e for e in events if e.get("event_type") in {"logon", "admin_logon"}]
-        elif "usb" in q_low or "usbstor" in q_low:
-            relevant_events = [e for e in events if "usb" in str(e.get("event_type", "")).lower() or "usb" in str(e.get("source_type", "")).lower()]
+    # 2. GENERAL EDUCATIONAL INTENT (e.g., "What is HTTP?", "Explain cryptography", "What is AI?")
+    if intent == INTENT_GENERAL:
+        messages = [
+            {"role": "system", "content": GENERAL_SYSTEM_PROMPT},
+            {"role": "user", "content": question},
+        ]
+        local_output = None
+        ollama_error = None
+        try:
+            local_output = query_ollama(
+                messages=messages,
+                model=model,
+                base_url=base_url,
+                temperature=temperature,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            ollama_error = str(exc)
 
-        context_lines = []
-        for ev in relevant_events[:4]:
-            ts = str(ev.get("timestamp") or "Observation").replace("T", " ")
-            ent = ev.get("target") or ev.get("object") or ev.get("process") or "endpoint"
-            context_lines.append(f"- {ts} — {ent} — evidence IDs [{ev.get('id')}]")
-
-        rules = []
-        if "https" in q_low or "443" in q_low or "tls" in q_low:
-            rules.append({
-                "title": "Network Activity ≠ Data Exfiltration",
-                "desc": "The presence of HTTPS or TCP port 443 indicates encrypted web/network communication, but by itself does not establish data exfiltration, confidential-file transfer, malicious activity, or unauthorized account use.",
-                "icon": "net",
-            })
-        elif "t1078" in q_low or "logon" in q_low:
-            rules.append({
-                "title": "Successful Logon ≠ Unauthorized Access",
-                "desc": "The presence of valid-account authentication establishes that logon occurred, but by itself does not establish unauthorized account use or compromise.",
-                "icon": "auth",
-            })
-
-        concept_data = {
-            "title": q_title,
-            "definition": definition,
-            "context": context_lines,
-            "rules": rules,
-        }
-
-        forensic_state = {
-            "assessment": {
-                "status": "CONCEPT DEFINITION",
-                "summary": definition,
-            },
-            "observed_evidence": [],
-            "unproven_findings": [],
-            "evidence_gaps": [],
-            "conclusion": {
-                "status": "CONCEPT DEFINITION",
-                "confidence": "High",
-                "priority": "INFORMATIONAL",
-                "summary": "Technical concept definition.",
-            },
-        }
-
-        answer = format_forensic_answer_markdown(forensic_state, {}, is_concept=True, concept_data=concept_data)
-        return {
-            "answer": answer,
-            "model": model,
-            "provider": "dfis_assistant",
-            "llm_mode": "local_concept_explanation",
-            "is_local": True,
-            "query_type": q_type,
-            "forensic_state": forensic_state,
-            "generated_analysis": None,
-            "concept_data": concept_data,
-            "generator": {
-                "type": "assistant",
-                "provider": "dfis_assistant",
+        if local_output:
+            clean_answer = normalize_llm_response(local_output)
+            return {
+                "answer": clean_answer,
+                "intent": INTENT_GENERAL,
+                "query_type": "general",
                 "model": model,
-                "mode": "local_concept_explanation",
-                "fallback": False,
-                "verified": True,
-                "reason": None,
+                "provider": "ollama",
+                "llm_mode": "local_general_ai",
+                "is_local": True,
+                "forensic_state": None,
+                "generated_analysis": None,
+                "concept_data": None,
+                "generator": {
+                    "type": "llm",
+                    "provider": "ollama",
+                    "model": model,
+                    "mode": "local_general_ai",
+                    "fallback": False,
+                    "verified": True,
+                    "reason": None,
+                    "provenance_id": req_id,
+                    "request_id": req_id,
+                    "generated_at": gen_time,
+                },
+            }
+
+        fallback_general = get_general_concept_response(question)
+        return {
+            "answer": fallback_general,
+            "intent": INTENT_GENERAL,
+            "query_type": "general",
+            "model": f"{model} (Offline Grounded Local Engine)",
+            "provider": "dfis_grounded_engine",
+            "llm_mode": "local_grounded_engine",
+            "is_local": True,
+            "forensic_state": None,
+            "generated_analysis": None,
+            "concept_data": None,
+            "generator": {
+                "type": "fallback",
+                "provider": "dfis_grounded_engine",
+                "model": None,
+                "mode": "deterministic_grounded_fallback",
+                "fallback": True,
+                "verified": False,
+                "reason": ollama_error or "ollama_unreachable",
                 "provenance_id": req_id,
                 "request_id": req_id,
                 "generated_at": gen_time,
             },
         }
 
-    # 3. Case Investigation Query: Compute Authoritative Canonical Forensic State First
+    # 3. TECHNICAL FORENSIC KNOWLEDGE INTENT (e.g., "Event ID 4624", "USBSTOR", "How to detect suspicious activity?")
+    if intent == INTENT_TECHNICAL_FORENSIC:
+        is_meth = any(k in question.lower() for k in METHODOLOGY_KEYWORDS)
+        messages = [
+            {"role": "system", "content": TECHNICAL_FORENSIC_SYSTEM_PROMPT},
+            {"role": "user", "content": question},
+        ]
+        local_output = None
+        ollama_error = None
+        try:
+            local_output = query_ollama(
+                messages=messages,
+                model=model,
+                base_url=base_url,
+                temperature=temperature,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            ollama_error = str(exc)
+
+        if local_output:
+            clean_output = normalize_llm_response(local_output)
+            if "General forensic knowledge is interpretive only" not in clean_output:
+                clean_output = f"{clean_output}\n\nGeneral forensic knowledge is interpretive only and does not constitute evidence in the current case."
+            return {
+                "answer": clean_output,
+                "intent": INTENT_TECHNICAL_FORENSIC,
+                "query_type": "technical_forensic",
+                "model": model,
+                "provider": "ollama",
+                "llm_mode": "local_forensic_knowledge",
+                "is_local": True,
+                "forensic_state": {
+                    "assessment": {"status": "CONCEPT DEFINITION", "summary": clean_output},
+                    "observed_evidence": [],
+                    "unproven_findings": [],
+                    "evidence_gaps": [],
+                    "conclusion": {"status": "CONCEPT DEFINITION", "confidence": "High", "priority": "INFORMATIONAL", "summary": "Forensic knowledge response."},
+                },
+                "generated_analysis": None,
+                "concept_data": {
+                    "title": question,
+                    "definition": clean_output,
+                    "context": [],
+                    "rules": [],
+                },
+                "generator": {
+                    "type": "llm",
+                    "provider": "ollama",
+                    "model": model,
+                    "mode": "local_forensic_knowledge",
+                    "fallback": False,
+                    "verified": True,
+                    "reason": None,
+                    "provenance_id": req_id,
+                    "request_id": req_id,
+                    "generated_at": gen_time,
+                },
+            }
+
+        # Offline fallback
+        if is_meth:
+            meth_text = get_forensic_methodology_response(question)
+            fallback_text = f"## Forensic Investigation Methodology\n\n{meth_text}\n\nGeneral forensic knowledge is interpretive only and does not constitute evidence in the current case.\nAI is an investigative assistant, not an evidence source."
+            return {
+                "answer": fallback_text,
+                "intent": INTENT_TECHNICAL_FORENSIC,
+                "query_type": "technical_forensic",
+                "model": f"{model} (Offline Grounded Local Engine)",
+                "provider": "dfis_grounded_engine",
+                "llm_mode": "local_forensic_knowledge",
+                "is_local": True,
+                "forensic_state": {
+                    "assessment": {"status": "CONCEPT DEFINITION", "summary": meth_text},
+                    "observed_evidence": [],
+                    "unproven_findings": [],
+                    "evidence_gaps": [],
+                    "conclusion": {"status": "CONCEPT DEFINITION", "confidence": "High", "priority": "INFORMATIONAL", "summary": "Forensic methodology guidance."},
+                },
+                "generated_analysis": None,
+                "concept_data": {
+                    "title": question,
+                    "definition": meth_text,
+                    "context": [],
+                    "rules": [],
+                },
+                "generator": {
+                    "type": "fallback",
+                    "provider": "dfis_grounded_engine",
+                    "model": None,
+                    "mode": "deterministic_grounded_fallback",
+                    "fallback": True,
+                    "verified": False,
+                    "reason": ollama_error or "ollama_unreachable",
+                    "provenance_id": req_id,
+                    "request_id": req_id,
+                    "generated_at": gen_time,
+                },
+            }
+        else:
+            q_title, definition = get_concept_definition(question)
+            concept_data = {"title": q_title, "definition": definition, "context": [], "rules": []}
+            ans = f"## Concept Definition\n{definition}\n\nGeneral forensic knowledge is interpretive only and does not constitute evidence in the current case.\nAI is an investigative assistant, not an evidence source."
+            return {
+                "answer": ans,
+                "intent": INTENT_TECHNICAL_FORENSIC,
+                "query_type": "technical_forensic",
+                "model": f"{model} (Offline Grounded Local Engine)",
+                "provider": "dfis_grounded_engine",
+                "llm_mode": "local_forensic_knowledge",
+                "is_local": True,
+                "forensic_state": {
+                    "assessment": {"status": "CONCEPT DEFINITION", "summary": definition},
+                    "observed_evidence": [],
+                    "unproven_findings": [],
+                    "evidence_gaps": [],
+                    "conclusion": {"status": "CONCEPT DEFINITION", "confidence": "High", "priority": "INFORMATIONAL", "summary": "Technical concept definition."},
+                },
+                "generated_analysis": None,
+                "concept_data": concept_data,
+                "generator": {
+                    "type": "fallback",
+                    "provider": "dfis_grounded_engine",
+                    "model": None,
+                    "mode": "deterministic_grounded_fallback",
+                    "fallback": True,
+                    "verified": False,
+                    "reason": ollama_error or "ollama_unreachable",
+                    "provenance_id": req_id,
+                    "request_id": req_id,
+                    "generated_at": gen_time,
+                },
+            }
+
+    # 4. FORENSIC_CASE_ANALYSIS INTENT (Full DFIS Canonical State Engine)
     forensic_state = build_canonical_forensic_state(events, inv, question)
     fallback_analysis = generate_analysis_narrative(question, events, inv, forensic_state)
+    messages = build_forensic_prompt(question, "case_investigation", events, inv, rag, forensic_state=forensic_state)
 
-    # 4. Build local LLM prompt injecting the Canonical State
-    messages = build_forensic_prompt(question, q_type, events, inv, rag, forensic_state=forensic_state)
-
-    # 5. Attempt local inference via Ollama
     local_output = None
     ollama_error = None
     try:
@@ -539,11 +687,12 @@ def generate_chat_response(
         answer = format_forensic_answer_markdown(forensic_state, llm_analysis)
         return {
             "answer": answer,
+            "intent": INTENT_CASE_ANALYSIS,
+            "query_type": "case_investigation",
             "model": model,
             "provider": "ollama",
             "llm_mode": "local_neural_inference",
             "is_local": True,
-            "query_type": q_type,
             "forensic_state": forensic_state,
             "generated_analysis": llm_analysis,
             "concept_data": None,
@@ -561,16 +710,17 @@ def generate_chat_response(
             },
         }
 
-    # 6. Fallback to Local Deterministic Grounded Reasoning Engine
+    # Fallback to Local Deterministic Grounded Reasoning Engine
     logger.info("Ollama unavailable or unverified. Using DFIS grounded fallback engine.")
     fallback_answer = format_forensic_answer_markdown(forensic_state, fallback_analysis)
     return {
         "answer": fallback_answer,
+        "intent": INTENT_CASE_ANALYSIS,
+        "query_type": "case_investigation",
         "model": f"{model} (Offline Grounded Local Engine)",
         "provider": "dfis_grounded_engine",
         "llm_mode": "local_grounded_engine",
         "is_local": True,
-        "query_type": q_type,
         "forensic_state": forensic_state,
         "generated_analysis": fallback_analysis,
         "concept_data": None,

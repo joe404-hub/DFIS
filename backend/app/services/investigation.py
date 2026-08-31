@@ -39,43 +39,81 @@ GREETING_REGEX = re.compile(
     re.I,
 )
 
-TECHNICAL_CONCEPTS = [
-    "https", "http", "tls", "ssl", "port 443", "port 80", "port 53", "dns",
-    "pcap", "pcapng", "evtx", "event id 4624", "event id 4688", "event id 7045",
-    "event 4624", "event 4688", "event 7045", "event 6416", "event 4104",
+INTENT_GREETING = "GREETING"
+INTENT_GENERAL = "GENERAL"
+INTENT_TECHNICAL_FORENSIC = "TECHNICAL_FORENSIC"
+INTENT_CASE_ANALYSIS = "FORENSIC_CASE_ANALYSIS"
+
+FORENSIC_TECHNICAL_CONCEPTS = [
+    "pcap", "pcapng", "evtx", "event id", "event 4624", "event 4688", "event 7045",
+    "event 6416", "event 4104", "event 4634", "event 4663", "4624", "6416",
     "t1078", "t1567", "t1052", "t1059", "t1543", "t1005", "mitre", "att&ck",
-    "sha-256", "sha256", "hash", "integrity", "usbstor", "userassist", "recentdocs",
-    "run key", "mft", "$mft", "prefetch", "amcache", "volatility", "memory snapshot"
+    "usbstor", "userassist", "recentdocs", "run key", "mft", "$mft",
+    "prefetch", "amcache", "shimcache", "volatility", "memory snapshot",
+    "memory acquisition", "disk acquisition", "chain of custody",
+    "digital forensic", "forensic analysis", "forensic", "forensics", "usn journal"
+]
+
+CASE_REFERENCE_KEYWORDS = [
+    "this case", "the case", "our case", "in the case", "in this case",
+    "this incident", "the incident", "in this workstation", "workstation-14",
+    "was confidential", "was any confidential", "was data copied", "was usb connected", "was file copied",
+    "did the user", "did analyst", "did j.patel", "who accessed", "who logged in", "who performed",
+    "at 09:", "at 10:", "at 11:", "around 09:", "between 09:", "09:00", "09:05", "09:14",
+    "in our evidence", "in the evidence", "in current evidence", "ingested evidence",
+    "next step", "next action", "what should we", "recommend next", "investigate next", "tasks",
+    "evidence #", "artifact #", "event #",
+    "api_keys.env", "projectx", "sourcecode.zip", "sensitive_projectx",
+    "was there exfiltration in this case", "was anything exfiltrated in this case",
+    "indicate exfiltration in this case"
+]
+
+METHODOLOGY_KEYWORDS = [
+    "how could we find", "how to find", "how can we find", "how do we find",
+    "how can we identify", "how to identify", "how do investigators find",
+    "how to detect", "how can we detect", "how do we detect",
+    "how to investigate", "how can we investigate", "how do we investigate",
+    "how is suspicious activity", "how to spot", "how do you find"
 ]
 
 
-def classify_user_query(question: str) -> str:
-    """Classify user query into: greeting, general, hybrid, or case_investigation."""
+def classify_query_intent(question: str) -> str:
+    """Classify user query into 4 distinct intents: GREETING, GENERAL, TECHNICAL_FORENSIC, FORENSIC_CASE_ANALYSIS."""
     q_stripped = question.strip()
     if GREETING_REGEX.match(q_stripped):
-        return "greeting"
+        return INTENT_GREETING
 
     q_low = q_stripped.lower()
 
-    # Check if asks for definition/concept explanation
-    is_definition = bool(re.search(
-        r"\b(means|meaning|definition|stand for|stands for|what is|what does|explain|define|tell me about|how does)\b",
-        q_low,
-    ))
-    has_concept = any(re.search(r"\b" + re.escape(c) + r"\b", q_low) for c in TECHNICAL_CONCEPTS)
-    is_case_specific = any(k in q_low for k in (
-        "this case", "in the case", "our case", "was confidential", "was data",
-        "was usb", "did the user", "next step", "recommend", "tasks", "timeline",
-        "indicate exfiltration", "exfiltrated in this case", "evidence of"
-    ))
+    # 1. Case-Specific Reference Check
+    if any(k in q_low for k in CASE_REFERENCE_KEYWORDS):
+        return INTENT_CASE_ANALYSIS
 
-    if is_case_specific and has_concept:
-        return "hybrid"
-    if is_definition and has_concept:
-        return "general"
-    if is_definition or (has_concept and len(q_low.split()) <= 4 and not is_case_specific):
-        return "general"
+    # Case-specific file / action questions
+    if any(k in q_low for k in ["was confidential data", "was any confidential", "was data copied to usb", "was usb copied", "who accessed"]):
+        return INTENT_CASE_ANALYSIS
 
+    # 2. General Forensic Methodology Check (e.g., "how could we find suspicious activity take place?")
+    if any(k in q_low for k in METHODOLOGY_KEYWORDS):
+        return INTENT_TECHNICAL_FORENSIC
+
+    # 3. Technical Forensic Concept / Artifact Check
+    if any(re.search(r"\b" + re.escape(c) + r"\b", q_low) for c in FORENSIC_TECHNICAL_CONCEPTS):
+        return INTENT_TECHNICAL_FORENSIC
+
+    # 4. Pure General Educational / Technical Question Check (e.g., "What is HTTP?", "Explain cryptography", "What is AI?")
+    return INTENT_GENERAL
+
+
+def classify_user_query(question: str) -> str:
+    """Backward-compatible wrapper mapping to lowercase query types."""
+    intent = classify_query_intent(question)
+    if intent == INTENT_GREETING:
+        return "greeting"
+    if intent == INTENT_GENERAL:
+        return "general"
+    if intent == INTENT_TECHNICAL_FORENSIC:
+        return "technical_forensic"
     return "case_investigation"
 
 
@@ -523,12 +561,32 @@ def get_concept_definition(query: str) -> tuple[str, str]:
             "to protect data exchanged between a browser and a web server and helps provide confidentiality "
             "and integrity of the communication over TCP port 443."
         )
-    if "t1078" in q_low or "valid account" in q_low:
+    if "t1078" in q_low or "4624" in q_low or "valid account" in q_low:
         return (
-            "What is MITRE ATT&CK T1078 (Valid Accounts)?",
+            "What is Windows Security Event 4624 / MITRE ATT&CK T1078 (Valid Accounts)?",
+            "Windows Security Event 4624 records a successful logon event on the system. It captures logon type (e.g., Type 2 Interactive, Type 3 Network, Type 10 RemoteInteractive), target account name, domain, and logon process.\n\n"
             "MITRE ATT&CK T1078 (Valid Accounts) refers to the use of legitimate credentials to access systems. "
-            "In forensic logs, Windows Security Event 4624 proves authentication occurred, but does not by itself "
-            "establish that the account was compromised or used without authorization."
+            "In forensic logs, Event 4624 proves authentication occurred, but does not by itself establish that the account was compromised or used without authorization."
+        )
+    if "4688" in q_low or "process creation" in q_low:
+        return (
+            "What is Windows Security Event 4688 (Process Creation)?",
+            "Windows Security Event 4688 records new process creation events on Windows endpoints. When command-line process auditing is enabled, it captures the full executable path, parent process ID, creator process name, and command-line execution arguments."
+        )
+    if "7045" in q_low or "service install" in q_low:
+        return (
+            "What is Windows System Event 7045 (New Service Installation)?",
+            "Windows System Event 7045 records when a new service is installed in the Windows Service Control Manager. It logs the service name, image path (executable path), and service type, making it a critical artifact for detecting persistence mechanisms (MITRE ATT&CK T1543.003)."
+        )
+    if "6416" in q_low:
+        return (
+            "What is Windows Security Event 6416 (New External Device Recognized)?",
+            "Windows Security Event 6416 is generated when a new plug-and-play external device (such as a USB mass storage flash drive) is connected and recognized by the Windows operating system. It records the device ID, vendor ID (VID), product ID (PID), and class GUID."
+        )
+    if "4104" in q_low or "powershell script" in q_low:
+        return (
+            "What is Windows Event 4104 (PowerShell Script Block Logging)?",
+            "Windows Event 4104 captures full PowerShell script block execution content as it is decoded and executed by the PowerShell engine, enabling forensic reconstruction of obfuscated or encoded commands."
         )
     if "t1567" in q_low or "exfil over web" in q_low:
         return (
@@ -575,6 +633,90 @@ def get_concept_definition(query: str) -> tuple[str, str]:
         f"Explanation for {query.strip()}:",
         "Digital forensics principles require establishing direct provenance, cryptographic hashes, "
         "and independent artifact corroboration before concluding that malicious activity occurred."
+    )
+
+
+def get_general_concept_response(query: str) -> str:
+    """Generate clear, educational explanation for general technical questions without forensic templates."""
+    q_low = query.lower()
+
+    if "https" in q_low:
+        return (
+            "HTTPS stands for Hypertext Transfer Protocol Secure.\n\n"
+            "It is the secure version of HTTP. HTTPS uses TLS (Transport Layer Security) encryption "
+            "to protect data exchanged between a browser and a web server and helps provide confidentiality "
+            "and integrity of the communication over TCP port 443."
+        )
+
+    if "cryptography" in q_low or "crypto" in q_low or "encryption" in q_low:
+        return (
+            "Cryptography is the scientific practice of securing information and communications through mathematical techniques and algorithms.\n\n"
+            "### Core Security Goals\n"
+            "- **Confidentiality**: Ensuring that information is accessible only to authorized entities.\n"
+            "- **Integrity**: Verifying that data has not been altered or tampered with in transit or storage.\n"
+            "- **Authentication**: Confirming the identity of users, processes, or devices.\n"
+            "- **Non-Repudiation**: Preventing a sender from denying the authenticity of a sent message.\n\n"
+            "### Primary Branches\n"
+            "1. **Symmetric Encryption**: Uses a single shared secret key for both encryption and decryption (e.g. AES-256, ChaCha20).\n"
+            "2. **Asymmetric Encryption**: Uses a mathematically linked key pair (public key for encryption, private key for decryption; e.g. RSA, ECC).\n"
+            "3. **Cryptographic Hashing**: One-way mathematical transformation that generates a fixed-size digest (e.g. SHA-256, SHA-3) to ensure data integrity."
+        )
+
+    if "what is ai" in q_low or "artificial intelligence" in q_low or "machine learning" in q_low:
+        return (
+            "Artificial Intelligence (AI) refers to computer systems engineered to perform tasks that traditionally require human cognitive intelligence.\n\n"
+            "### Key Categories\n"
+            "- **Machine Learning (ML)**: Statistical algorithms that learn patterns from training data to make predictions or classifications without explicit rule programming.\n"
+            "- **Deep Learning (Neural Networks)**: Multi-layered artificial neural network architectures capable of processing unstructured data (e.g. text, images, speech).\n"
+            "- **Large Language Models (LLMs)**: Deep learning transformer models trained on vast text corpora to understand, reason, and generate natural language (e.g. Llama 3.2)."
+        )
+
+    if "http" in q_low:
+        return (
+            "HTTP (Hypertext Transfer Protocol) is the foundational application-layer protocol for data communication on the World Wide Web.\n\n"
+            "### Key Characteristics\n"
+            "- **Client-Server Architecture**: Web browsers send HTTP requests (e.g. GET, POST) to web servers, which return status codes (e.g. 200 OK, 404 Not Found) and content.\n"
+            "- **Stateless Protocol**: Each request is executed independently without inherent memory of previous requests.\n"
+            "- **Port**: Standard HTTP operates over unencrypted TCP port 80 (in contrast to HTTPS over port 443)."
+        )
+
+    if "python" in q_low:
+        return (
+            "Python is a high-level, interpreted, general-purpose programming language designed with an emphasis on code readability.\n\n"
+            "### Key Features\n"
+            "- **Dynamic Typing & Memory Management**: Automatically manages object allocation and garbage collection.\n"
+            "- **Extensive Ecosystem**: Widely used in data science, artificial intelligence, digital forensics tooling, backend APIs, and automation.\n"
+            "- **Cross-Platform**: Runs seamlessly across Windows, Linux, and macOS."
+        )
+
+    return (
+        f"### Technical Overview: {query.strip()}\n\n"
+        "This is an educational explanation provided by the local language model. "
+        "The question addresses a general technical subject and is answered in standard educational mode."
+    )
+
+
+def get_forensic_methodology_response(query: str) -> str:
+    """Generate structured forensic methodology and detection guidance for technical questions."""
+    return (
+        "To identify and investigate suspicious activity in digital forensic investigations, examiners follow a structured multi-source methodology:\n\n"
+        "### 1. Authentication & Account Activity Analysis\n"
+        "- Examine Windows Security Event Logs (Event ID 4624 for successful logons, Event ID 4625 for logon failures, Event ID 4672 for special privileges assigned).\n"
+        "- Identify unusual logon hours, suspicious logon types (e.g., Type 3 Network vs Type 10 RemoteInteractive), or unfamiliar user accounts.\n\n"
+        "### 2. Process Execution & Persistence Artifacts\n"
+        "- **Execution Tracking**: Inspect Windows Prefetch (.pf) files, Amcache.hve, and Shimcache (AppCompatCache) to confirm binary execution history and execution counts.\n"
+        "- **Scripting & Command Activity**: Review Process Creation events (Event ID 4688) with command-line logging enabled, and PowerShell Script Block logs (Event ID 4104).\n"
+        "- **Persistence Mechanisms**: Inspect registry Run keys (`HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run`), Windows Services (Event ID 7045), and Scheduled Tasks.\n\n"
+        "### 3. Filesystem & Staging Activity\n"
+        "- Analyze the NTFS Master File Table ($MFT) Standard Information and File Name timestamps to detect file staging, rename operations, or timestomping.\n"
+        "- Inspect User RecentDocs, Jump Lists, and Shellbags to verify user interaction with confidential documents and folders.\n\n"
+        "### 4. Removable Storage & External Devices\n"
+        "- Inspect the SYSTEM registry hive (`CurrentControlSet\\Enum\\USBSTOR` and `USB`) to identify connected USB serial numbers, vendors, and device IDs.\n"
+        "- Correlate with Security Event 6416 (`A new external device was recognized by the system`) and device setup logs (`setupapi.dev.log`).\n\n"
+        "### 5. Network & Exfiltration Inspection\n"
+        "- Examine DNS query logs, TCP/UDP connection flows, browser history (SQLite), and proxy records for connections to unknown external IP addresses, cloud storage, or file-sharing services.\n\n"
+        "### 6. Unified Timeline Correlation\n"
+        "- Correlate all timestamps in UTC across disparate log sources to construct an unbroken chronological sequence of events and identify temporal gaps."
     )
 
 
@@ -636,17 +778,24 @@ def _concept_response(question: str, events: list[dict], inv: dict, is_hybrid: b
 
 def answer_question(question: str, rag: dict, events: list[dict], inv: dict) -> str:
     """Route query appropriately and synthesize grounded forensic answers enforcing eight grounding rules."""
-    q_type = classify_user_query(question)
+    intent = classify_query_intent(question)
 
     # 1. Routing: Greeting / Casual queries
-    if q_type == "greeting":
+    if intent == INTENT_GREETING:
         return _greeting_response()
 
-    # 2. Routing: General Forensic Concept queries & Hybrid queries
-    if q_type == "general" or q_type == "hybrid":
-        return _concept_response(question, events, inv, is_hybrid=(q_type == "hybrid"))
+    # 2. Routing: Pure General Educational / Technical queries
+    if intent == INTENT_GENERAL:
+        return get_general_concept_response(question)
 
-    # 3. Routing: Case-Specific Investigation queries
+    # 3. Routing: Technical Forensic Knowledge & Methodology queries
+    if intent == INTENT_TECHNICAL_FORENSIC:
+        if any(k in question.lower() for k in METHODOLOGY_KEYWORDS):
+            meth = get_forensic_methodology_response(question)
+            return f"## Forensic Investigation Methodology\n\n{meth}\n\nGeneral forensic knowledge is interpretive only and cannot be presented as case evidence.\nAI is an investigative assistant, not an evidence source."
+        return _concept_response(question, events, inv, is_hybrid=False)
+
+    # 4. Routing: Case-Specific Investigation queries
     q = question.lower()
     lines = [
         f"Question: {question}",

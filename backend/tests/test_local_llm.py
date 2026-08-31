@@ -324,3 +324,47 @@ def test_api_chat_endpoint_returns_canonical_forensic_state(db_session):
     finally:
         app.dependency_overrides.pop(get_db, None)
 
+
+def test_generate_chat_response_general_educational(test_case_state, test_events):
+    """Verify general educational queries return clean normal LLM responses without forensic templates."""
+    # 1. Cryptography query
+    res_crypto = generate_chat_response(
+        question="Explain cryptography",
+        events=test_events,
+        inv=test_case_state,
+        rag={},
+    )
+    assert res_crypto["intent"] == "GENERAL"
+    assert "Confidentiality" in res_crypto["answer"] or "cryptography" in res_crypto["answer"].lower()
+    assert res_crypto["forensic_state"] is None
+    assert "FORENSIC ASSESSMENT" not in res_crypto["answer"]
+    assert "OBSERVED CASE EVIDENCE" not in res_crypto["answer"]
+    assert "USB-based" not in res_crypto["answer"]
+
+    # 2. AI query
+    res_ai = generate_chat_response(
+        question="What is AI?",
+        events=test_events,
+        inv=test_case_state,
+        rag={},
+    )
+    assert res_ai["intent"] == "GENERAL"
+    assert "Artificial Intelligence" in res_ai["answer"]
+    assert res_ai["forensic_state"] is None
+
+
+def test_generate_chat_response_technical_forensic_methodology(test_case_state, test_events):
+    """Verify forensic methodology questions return structured knowledge without case verdict dumps."""
+    res = generate_chat_response(
+        question="how could we find the suspicious activity taken place?",
+        events=test_events,
+        inv=test_case_state,
+        rag={},
+    )
+    assert res["intent"] == "TECHNICAL_FORENSIC"
+    assert "Authentication" in res["answer"] or "Event ID 4624" in res["answer"]
+    assert "Process Execution" in res["answer"] or "Prefetch" in res["answer"]
+    assert "General forensic knowledge is interpretive only" in res["answer"]
+    # Does not dump the USB false verdict
+    assert "The available evidence does not establish that any confidential file was copied to a USB device" not in res["answer"]
+

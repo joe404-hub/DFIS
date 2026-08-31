@@ -5,35 +5,47 @@ import pytest
 
 from app.services.investigation import (
     classify_and_score,
+    classify_query_intent,
     classify_user_query,
     get_evidentiary_states,
     attack_chain,
     answer_question,
     run_investigation,
+    INTENT_GREETING,
+    INTENT_GENERAL,
+    INTENT_TECHNICAL_FORENSIC,
+    INTENT_CASE_ANALYSIS,
 )
 
 
 def test_query_classifier():
-    # Greetings
-    assert classify_user_query("hi") == "greeting"
-    assert classify_user_query("hello") == "greeting"
-    assert classify_user_query("hey there") == "greeting"
-    assert classify_user_query("who are you") == "greeting"
-    assert classify_user_query("help") == "greeting"
+    # 1. Greetings
+    assert classify_query_intent("hi") == INTENT_GREETING
+    assert classify_query_intent("hello") == INTENT_GREETING
+    assert classify_query_intent("hey there") == INTENT_GREETING
+    assert classify_query_intent("who are you") == INTENT_GREETING
+    assert classify_query_intent("help") == INTENT_GREETING
 
-    # General concept
-    assert classify_user_query("https means") == "general"
-    assert classify_user_query("What does HTTPS mean?") == "general"
-    assert classify_user_query("What is MITRE ATT&CK?") == "general"
-    assert classify_user_query("What is T1078?") == "general"
+    # 2. General Concept queries
+    assert classify_query_intent("What is HTTP?") == INTENT_GENERAL
+    assert classify_query_intent("https means") == INTENT_GENERAL
+    assert classify_query_intent("What does HTTPS mean?") == INTENT_GENERAL
+    assert classify_query_intent("Explain cryptography") == INTENT_GENERAL
+    assert classify_query_intent("What is AI?") == INTENT_GENERAL
+    assert classify_query_intent("Explain Python") == INTENT_GENERAL
 
-    # Hybrid
-    assert classify_user_query("Does the HTTPS activity in this case indicate exfiltration?") == "hybrid"
+    # 3. Technical Forensic Knowledge & Methodology queries
+    assert classify_query_intent("What is a Windows Event ID 4624?") == INTENT_TECHNICAL_FORENSIC
+    assert classify_query_intent("What is USBSTOR?") == INTENT_TECHNICAL_FORENSIC
+    assert classify_query_intent("What is MITRE ATT&CK?") == INTENT_TECHNICAL_FORENSIC
+    assert classify_query_intent("What is T1078?") == INTENT_TECHNICAL_FORENSIC
+    assert classify_query_intent("how could we find the suspicious activity taken place?") == INTENT_TECHNICAL_FORENSIC
 
-    # Case investigation
-    assert classify_user_query("Was confidential data copied to USB?") == "case_investigation"
-    assert classify_user_query("What was chrome.exe accessing?") == "case_investigation"
-    assert classify_user_query("What are the recommended next steps?") == "case_investigation"
+    # 4. Case Investigation queries
+    assert classify_query_intent("Was confidential data copied to USB?") == INTENT_CASE_ANALYSIS
+    assert classify_query_intent("Does the HTTPS activity in this case indicate exfiltration?") == INTENT_CASE_ANALYSIS
+    assert classify_query_intent("What was chrome.exe accessing in this case?") == INTENT_CASE_ANALYSIS
+    assert classify_query_intent("What are the recommended next steps?") == INTENT_CASE_ANALYSIS
 
 
 def test_general_https_response():
@@ -51,12 +63,11 @@ def test_general_https_response():
         "correlations": [],
     }
 
-    ans = answer_question("https means", {}, events, inv)
+    ans = answer_question("What does HTTPS mean?", {}, events, inv)
     assert "Hypertext Transfer Protocol Secure" in ans
-    assert "CASE-SPECIFIC CONTEXT:" in ans
     assert "Working classification:" not in ans  # Does not dump classification template for concept question
-    assert "does not establish" in ans
-    assert "General forensic knowledge is interpretive only" in ans
+    assert "OBSERVED CASE EVIDENCE" not in ans
+    assert "FORENSIC ASSESSMENT" not in ans
 
 
 def test_greeting_does_not_inject_case_classification():
