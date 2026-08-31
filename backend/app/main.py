@@ -647,6 +647,9 @@ def chat(case_id: int, body: ChatIn, db: Session = Depends(get_db)):
             "fallback": True,
             "verified": False,
         }),
+        "forensic_state": chat_res.get("forensic_state"),
+        "generated_analysis": chat_res.get("generated_analysis"),
+        "concept_data": chat_res.get("concept_data"),
         "rag": analysis.get("rag") or rag,
         "category": analysis.get("category"),
         "investigation": {

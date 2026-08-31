@@ -75,18 +75,13 @@ def build_forensic_prompt(
     events: list[dict],
     inv: dict,
     rag: dict,
+    forensic_state: dict | None = None,
 ) -> list[dict[str, str]]:
     """Construct structured context-injected messages for llama3.2:3b."""
     category = inv.get("category") or "Normal Activity"
     secondary = inv.get("secondary") or ""
     risk_score = inv.get("risk_score", 0)
     priority = inv.get("priority") or (inv.get("risk") or {}).get("priority") or "LOW"
-
-    # Evidentiary states summary
-    states_lines = []
-    for st in inv.get("evidentiary_states") or []:
-        states_lines.append(f"  - {st.get('finding')}: {st.get('state')} ({st.get('detail', '')})")
-    states_str = "\n".join(states_lines) if states_lines else "  - No state transitions evaluated."
 
     # Correlated groups summary
     groups_lines = []
@@ -126,6 +121,27 @@ INSTRUCTIONS:
 3. State clearly that common technical artifacts (e.g. HTTPS/443, port numbers) do not by themselves establish data exfiltration or malicious intent.
 4. Do NOT dump the case incident classification or risk template for this general definition question."""
     else:
+        # Canonical state presentation in prompt
+        if forensic_state:
+            obs = [f"  - {item['title']}: {item['description']} (Evidence IDs: {item.get('evidence_ids', [])})" for item in forensic_state.get("observed_evidence", [])]
+            unp = [f"  - {item['title']}: {item['description']} [{item['status'].replace('_', ' ')}]" for item in forensic_state.get("unproven_findings", [])]
+            gaps = [f"  - {item['title']}: {item['description']} [{item['severity']}]" for item in forensic_state.get("evidence_gaps", [])]
+            state_repr = f"""--- CANONICAL FORENSIC STATE (PRE-CLASSIFIED BY DFIS BACKEND) ---
+ASSESSMENT: {forensic_state.get('assessment', {}).get('status', 'NOT ESTABLISHED').replace('_', ' ')} — {forensic_state.get('assessment', {}).get('summary', '')}
+
+OBSERVED EVIDENCE ({len(obs)}):
+{chr(10).join(obs)}
+
+NOT ESTABLISHED / UNPROVEN FINDINGS ({len(unp)}):
+{chr(10).join(unp)}
+
+EVIDENCE GAPS ({len(gaps)}):
+{chr(10).join(gaps)}
+"""
+        else:
+            states_lines = [f"  - {st.get('finding')}: {st.get('state')} ({st.get('detail', '')})" for st in inv.get('evidentiary_states') or []]
+            state_repr = "--- 4-TIER EVIDENTIARY STATES ---\n" + "\n".join(states_lines)
+
         user_content = f"""[INVESTIGATION QUERY INTENT]: {query_type.upper()}
 [USER QUESTION]: {question}
 
@@ -133,8 +149,7 @@ INSTRUCTIONS:
 Working classification: {category} {f'/ {secondary}' if secondary else ''}
 Investigation Priority: {risk_score}/100 — {priority}
 
---- 4-TIER EVIDENTIARY STATES ---
-{states_str}
+{state_repr}
 
 --- CORRELATED ACTIVITY GROUPS ---
 {groups_str}
@@ -146,11 +161,10 @@ Investigation Priority: {risk_score}/100 — {priority}
 {kb_str}
 
 INSTRUCTIONS:
-Provide an objective, structured response following these sections:
-FORENSIC ASSESSMENT: State whether the finding is OBSERVED, NOT ESTABLISHED, or HYPOTHESIZED with supporting rationale.
-OBSERVED EVIDENCE: List specific observed case events with exact Evidence IDs (e.g. Evidence ID [27, 28]).
-EVIDENCE GAPS: Explicitly state any missing or unverified evidence (e.g. drive-to-device mapping).
-INVESTIGATIVE INTERPRETATION: Explain analytical hypotheses (e.g. ATT&CK mappings) and examiner verification steps."""
+You are an investigative assistant explaining the canonical case evidence.
+1. The evidence classification is already determined by the backend. Do NOT alter what is observed vs unproven.
+2. Provide an analytical INVESTIGATIVE INTERPRETATION and ATT&CK ANALYSIS.
+3. Provide a numbered EXAMINER VERIFICATION CHECKLIST (1..5) with specific verification steps."""
 
     return [
         {"role": "system", "content": FORENSIC_SYSTEM_PROMPT},
@@ -319,6 +333,45 @@ def post_process_llm_answer(raw_answer: str, query_type: str) -> str:
     return answer
 
 
+def extract_llm_analysis(raw_text: str, fallback_analysis: dict) -> dict[str, Any]:
+    """Parse LLM narrative text into structured generated_analysis fields."""
+    analysis = dict(fallback_analysis)
+    if not raw_text:
+        return analysis
+
+    clean = normalize_llm_response(raw_text)
+
+    # Search for ATT&CK mapping
+    attck_match = re.search(r"(?:ATT&CK\s*Hypothesis|ATT&CK\s*mapping):\s*([^\n]+)", clean, re.IGNORECASE)
+    if attck_match:
+        analysis["attck_hypothesis"] = attck_match.group(1).strip()
+
+    # Search for Status & Confidence
+    status_match = re.search(r"Status:\s*([^\n]+)", clean, re.IGNORECASE)
+    if status_match:
+        analysis["attck_status"] = status_match.group(1).strip()
+
+    conf_match = re.search(r"Confidence:\s*([^\n]+)", clean, re.IGNORECASE)
+    if conf_match:
+        analysis["attck_confidence"] = conf_match.group(1).strip()
+
+    # Search for Assessment narrative
+    narr_match = re.search(r"(?:Assessment|Investigative\s*Interpretation):\s*([^\n]+(?:\n[^\n#]+)*)", clean, re.IGNORECASE)
+    if narr_match:
+        narr_text = narr_match.group(1).strip()
+        if "Examiner Verification Checklist" in narr_text or "1." in narr_text:
+            narr_text = re.split(r"(?:Examiner\s*Verification\s*Checklist|1\.\s*)", narr_text)[0].strip()
+        if len(narr_text) > 20:
+            analysis["interpretation"] = narr_text
+
+    # Search for Examiner verification steps
+    steps = re.findall(r"(?:\d+\.\s+[^\n]+)", clean)
+    if len(steps) >= 2:
+        analysis["verification_steps"] = [s.strip() for s in steps if len(s.strip()) > 5]
+
+    return analysis
+
+
 def generate_chat_response(
     question: str,
     events: list[dict],
@@ -332,15 +385,20 @@ def generate_chat_response(
     """Execute complete Local LLM query with explicit generation metadata & provenance.
     
     Guarantees:
-    - 100% local execution
-    - Clear provenance metadata distinguishing neural completions vs fallback
-    - Timestamps and unique Request IDs for cryptographic provenance tracking
-    - Never calls online/external chatbots
-    - If Ollama daemon is active, uses llama3.2:3b local neural reasoning (verified=True, fallback=False)
-    - If Ollama daemon is starting/offline, uses deterministic forensic engine (verified=False, fallback=True)
-    - Enforces 4-tier evidentiary state consistency and grounding invariants
+    - 100% local execution.
+    - Rule 1: One canonical evidence classifier.
+    - Rule 2: Both LLM and Fallback consume and output the exact same forensic_state.
+    - Rule 3: Deduplicate forensic findings into unified findings.
+    - Timestamps and unique Request IDs for cryptographic provenance tracking.
     """
-    from app.services.investigation import answer_question, classify_user_query
+    from app.services.investigation import (
+        answer_question,
+        build_canonical_forensic_state,
+        classify_user_query,
+        format_forensic_answer_markdown,
+        generate_analysis_narrative,
+        get_concept_definition,
+    )
 
     q_type = classify_user_query(question)
     req_id = f"chat-{uuid.uuid4().hex[:8]}"
@@ -356,6 +414,9 @@ def generate_chat_response(
             "llm_mode": "local_greeting",
             "is_local": True,
             "query_type": q_type,
+            "forensic_state": None,
+            "generated_analysis": None,
+            "concept_data": None,
             "generator": {
                 "type": "assistant",
                 "provider": "dfis_assistant",
@@ -370,10 +431,95 @@ def generate_chat_response(
             },
         }
 
-    # 2. Build local LLM prompt
-    messages = build_forensic_prompt(question, q_type, events, inv, rag)
+    # 2. Check if general concept or hybrid query
+    if q_type in {"general", "hybrid"}:
+        q_title, definition = get_concept_definition(question)
+        q_low = question.lower()
+        
+        relevant_events = []
+        if "https" in q_low or "http" in q_low or "tls" in q_low or "443" in q_low:
+            relevant_events = [e for e in events if e.get("source_type") in {"network", "browser"}]
+        elif "t1078" in q_low or "logon" in q_low or "auth" in q_low:
+            relevant_events = [e for e in events if e.get("event_type") in {"logon", "admin_logon"}]
+        elif "usb" in q_low or "usbstor" in q_low:
+            relevant_events = [e for e in events if "usb" in str(e.get("event_type", "")).lower() or "usb" in str(e.get("source_type", "")).lower()]
 
-    # 3. Attempt local inference via Ollama
+        context_lines = []
+        for ev in relevant_events[:4]:
+            ts = str(ev.get("timestamp") or "Observation").replace("T", " ")
+            ent = ev.get("target") or ev.get("object") or ev.get("process") or "endpoint"
+            context_lines.append(f"- {ts} — {ent} — evidence IDs [{ev.get('id')}]")
+
+        rules = []
+        if "https" in q_low or "443" in q_low or "tls" in q_low:
+            rules.append({
+                "title": "Network Activity ≠ Data Exfiltration",
+                "desc": "The presence of HTTPS or TCP port 443 indicates encrypted web/network communication, but by itself does not establish data exfiltration, confidential-file transfer, malicious activity, or unauthorized account use.",
+                "icon": "net",
+            })
+        elif "t1078" in q_low or "logon" in q_low:
+            rules.append({
+                "title": "Successful Logon ≠ Unauthorized Access",
+                "desc": "The presence of valid-account authentication establishes that logon occurred, but by itself does not establish unauthorized account use or compromise.",
+                "icon": "auth",
+            })
+
+        concept_data = {
+            "title": q_title,
+            "definition": definition,
+            "context": context_lines,
+            "rules": rules,
+        }
+
+        forensic_state = {
+            "assessment": {
+                "status": "CONCEPT DEFINITION",
+                "summary": definition,
+            },
+            "observed_evidence": [],
+            "unproven_findings": [],
+            "evidence_gaps": [],
+            "conclusion": {
+                "status": "CONCEPT DEFINITION",
+                "confidence": "High",
+                "priority": "INFORMATIONAL",
+                "summary": "Technical concept definition.",
+            },
+        }
+
+        answer = format_forensic_answer_markdown(forensic_state, {}, is_concept=True, concept_data=concept_data)
+        return {
+            "answer": answer,
+            "model": model,
+            "provider": "dfis_assistant",
+            "llm_mode": "local_concept_explanation",
+            "is_local": True,
+            "query_type": q_type,
+            "forensic_state": forensic_state,
+            "generated_analysis": None,
+            "concept_data": concept_data,
+            "generator": {
+                "type": "assistant",
+                "provider": "dfis_assistant",
+                "model": model,
+                "mode": "local_concept_explanation",
+                "fallback": False,
+                "verified": True,
+                "reason": None,
+                "provenance_id": req_id,
+                "request_id": req_id,
+                "generated_at": gen_time,
+            },
+        }
+
+    # 3. Case Investigation Query: Compute Authoritative Canonical Forensic State First
+    forensic_state = build_canonical_forensic_state(events, inv, question)
+    fallback_analysis = generate_analysis_narrative(question, events, inv, forensic_state)
+
+    # 4. Build local LLM prompt injecting the Canonical State
+    messages = build_forensic_prompt(question, q_type, events, inv, rag, forensic_state=forensic_state)
+
+    # 5. Attempt local inference via Ollama
     local_output = None
     ollama_error = None
     try:
@@ -389,14 +535,18 @@ def generate_chat_response(
         logger.warning("Ollama generation error: %s", exc)
 
     if local_output:
-        processed_answer = post_process_llm_answer(local_output, q_type)
+        llm_analysis = extract_llm_analysis(local_output, fallback_analysis)
+        answer = format_forensic_answer_markdown(forensic_state, llm_analysis)
         return {
-            "answer": processed_answer,
+            "answer": answer,
             "model": model,
             "provider": "ollama",
             "llm_mode": "local_neural_inference",
             "is_local": True,
             "query_type": q_type,
+            "forensic_state": forensic_state,
+            "generated_analysis": llm_analysis,
+            "concept_data": None,
             "generator": {
                 "type": "llm",
                 "provider": "ollama",
@@ -411,9 +561,9 @@ def generate_chat_response(
             },
         }
 
-    # 4. Fallback to Local Deterministic Grounded Reasoning Engine
+    # 6. Fallback to Local Deterministic Grounded Reasoning Engine
     logger.info("Ollama unavailable or unverified. Using DFIS grounded fallback engine.")
-    fallback_answer = answer_question(question, rag, events, inv)
+    fallback_answer = format_forensic_answer_markdown(forensic_state, fallback_analysis)
     return {
         "answer": fallback_answer,
         "model": f"{model} (Offline Grounded Local Engine)",
@@ -421,6 +571,9 @@ def generate_chat_response(
         "llm_mode": "local_grounded_engine",
         "is_local": True,
         "query_type": q_type,
+        "forensic_state": forensic_state,
+        "generated_analysis": fallback_analysis,
+        "concept_data": None,
         "generator": {
             "type": "fallback",
             "provider": "dfis_grounded_engine",

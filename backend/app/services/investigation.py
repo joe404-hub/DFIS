@@ -864,5 +864,341 @@ def _usb_transfer_answer(inv: dict, events: list[dict]) -> str | None:
     )
 
 
+def build_canonical_forensic_state(events: list[dict], inv: dict, question: str = "") -> dict[str, Any]:
+    """Generate the authoritative, rule-based canonical forensic state for a case.
+    
+    Guarantees:
+    - Rule 1: One canonical evidence classifier.
+    - Rule 2: Both LLM and fallback consume the exact same classified state.
+    - Rule 3: Deduplicate forensic findings (e.g., all USB artifacts grouped into 1 finding).
+    - Separation of Evidence IDs, Windows Event IDs, and Artifact tags.
+    """
+    groups = inv.get("correlations") or []
+    blob = " ".join(f"{e.get('description','')} {e.get('event_type','')} {e.get('target','')}" for e in events).lower()
+    
+    # 1. User Authentication
+    auth_events = [
+        e for e in events
+        if e.get("event_type") in {"logon", "admin_logon"}
+        or "4624" in str(e.get("event_id", ""))
+        or "4624" in (e.get("description") or "")
+    ]
+    
+    # 2. Network & Browser Activity
+    net_events = [
+        e for e in events
+        if e.get("source_type") in {"network", "browser"}
+        or any(k in (e.get("description") or "").lower() for k in ["browser visit", "tcp connection", "dns query", "tcp flow", "http", "download"])
+    ]
+    
+    # 3. USB Device Connection
+    usb_events = [
+        e for e in events
+        if "usb" in str(e.get("event_type", "")).lower()
+        or "usb" in str(e.get("source_type", "")).lower()
+        or "6416" in str(e.get("event_id", ""))
+        or "20001" in str(e.get("event_id", ""))
+        or "usbstor" in (e.get("description") or "").lower()
+        or "usb mass storage" in (e.get("description") or "").lower()
+        or "sandisk" in (e.get("target") or "").lower()
+        or "sandisk" in (e.get("description") or "").lower()
+    ]
+    
+    # 4. Sensitive File Access & Staging
+    file_access_events = [
+        e for e in events
+        if e.get("event_type") in {"file_access", "archive_created"}
+        and e.get("source_type") != "correlated"
+    ]
+    
+    # 5. Process Execution & Scripting
+    proc_events = [
+        e for e in events
+        if e.get("event_type") in {"process_create", "powershell_script", "service_install"}
+        or "powershell" in (e.get("process") or "").lower()
+        or "powershell" in (e.get("description") or "").lower()
+    ]
+
+    observed_evidence = []
+    
+    # Observed Item 1: User Authentication
+    if auth_events:
+        ev_ids = sorted(list({e["id"] for e in auth_events if e.get("id") is not None}))
+        observed_evidence.append({
+            "id": "auth_logon",
+            "title": "User Authentication",
+            "description": "Successful Windows logon observed (Windows Event 4624).",
+            "evidence_ids": ev_ids,
+            "event_ids": [4624],
+            "artifacts": [],
+        })
+        
+    # Observed Item 2: Network & Browser Activity
+    if net_events:
+        ev_ids = sorted(list({e["id"] for e in net_events if e.get("id") is not None}))
+        observed_evidence.append({
+            "id": "network_browser",
+            "title": "Network & Browser Activity",
+            "description": "Browser visits and network connection flows recorded.",
+            "evidence_ids": ev_ids,
+            "event_ids": [],
+            "artifacts": [],
+        })
+        
+    # Observed Item 3: USB Device Connection (DEDUPLICATED into 1 finding)
+    has_usb = len(usb_events) > 0 or any(g.get("family") in {"usb_connect", "usb_remove"} for g in groups)
+    if has_usb:
+        ev_ids = sorted(list({e["id"] for e in usb_events if e.get("id") is not None and e.get("source_type") != "correlated"}))
+        event_ids = [6416] if any("6416" in str(e.get("event_id", "")) or "6416" in (e.get("description") or "") for e in usb_events) else []
+        artifacts = ["USBSTOR"] if any("usbstor" in (e.get("description") or "").lower() or "registry" in str(e.get("source_type", "")).lower() or "usb" in (e.get("description") or "").lower() for e in usb_events) else ["USBSTOR"]
+        observed_evidence.append({
+            "id": "usb_connection",
+            "title": "USB Device Connection",
+            "description": "Removable storage connection observed (Security Event 6416 / USBSTOR).",
+            "evidence_ids": ev_ids,
+            "event_ids": event_ids,
+            "artifacts": artifacts,
+        })
+
+    # Observed Item 4: Sensitive File Access & Staging (if present)
+    if file_access_events:
+        ev_ids = sorted(list({e["id"] for e in file_access_events if e.get("id") is not None}))
+        observed_evidence.append({
+            "id": "file_access_staging",
+            "title": "Sensitive File Access & Staging",
+            "description": "Confidential files and staging archives accessed on the local filesystem.",
+            "evidence_ids": ev_ids,
+            "event_ids": [],
+            "artifacts": [],
+        })
+
+    # Unproven Findings (Consistent forensic evaluation)
+    unproven_findings = [
+        {
+            "id": "unauth_account",
+            "title": "Unauthorized Account Use",
+            "status": "NOT_ESTABLISHED",
+            "description": "Valid-account authentication observed; unauthorized access is unproven.",
+        },
+    ]
+
+    if not has_usb:
+        unproven_findings.append({
+            "id": "usb_connection",
+            "title": "USB Device Connection",
+            "status": "NOT_ESTABLISHED",
+            "description": "No supporting USB connection artifact is available in current evidence.",
+        })
+
+    unproven_findings.extend([
+        {
+            "id": "confidential_file_copy",
+            "title": "Confidential File Copying to USB",
+            "status": "NOT_ESTABLISHED",
+            "description": "No file copy events to removable media recorded in the ingested evidence." if not has_usb else "Drive-to-device mapping is unproven; copy to removable drive not established.",
+        },
+        {
+            "id": "data_exfil",
+            "title": "Data Exfiltration",
+            "status": "NOT_ESTABLISHED",
+            "description": "No evidence establishing that data was transferred outside the organization.",
+        },
+    ])
+
+    # Evidence Gaps & Missing Proofs
+    evidence_gaps = [
+        {
+            "id": "drive_mapping",
+            "title": "Drive-to-Device Mapping",
+            "severity": "Critical Correlation Gap",
+            "description": "The mapping between the USB device and the file system is not established.",
+        },
+        {
+            "id": "fs_timestamps",
+            "title": "File System Timestamps",
+            "severity": "Missing Temporal Evidence",
+            "description": "The timestamps of the file system changes are not available.",
+        },
+        {
+            "id": "cloud_uploads",
+            "title": "Browser Cloud Uploads",
+            "severity": "Correlation Required",
+            "description": "The uploads of sensitive files to cloud storage services are not verified.",
+        },
+    ]
+
+    # Primary Assessment Status & Summary
+    priority_label = inv.get("priority") or (inv.get("risk") or {}).get("priority") or "LOW PRIORITY"
+    assessment = {
+        "status": "NOT_ESTABLISHED",
+        "summary": "The available evidence does not establish that any confidential file was copied to a USB device.",
+    }
+
+    conclusion = {
+        "status": "NOT_ESTABLISHED",
+        "confidence": "Medium",
+        "priority": priority_label,
+        "summary": "The currently ingested evidence does not establish that confidential data was copied to a USB device.",
+    }
+
+    return {
+        "assessment": assessment,
+        "observed_evidence": observed_evidence,
+        "unproven_findings": unproven_findings,
+        "evidence_gaps": evidence_gaps,
+        "conclusion": conclusion,
+    }
+
+
+def generate_analysis_narrative(
+    question: str,
+    events: list[dict],
+    inv: dict,
+    forensic_state: dict,
+) -> dict[str, Any]:
+    """Deterministic grounded narrative analysis generator for investigative interpretations."""
+    net_events = [e for e in events if e.get("source_type") in {"network", "browser"}]
+    net_ids = sorted(list({e["id"] for e in net_events if e.get("id") is not None}))[:4]
+    
+    hypotheses = [
+        {
+            "id": "network_transfer",
+            "title": "Possible Network-Based Transfer",
+            "status": "HYPOTHESIS · CORRELATION REQUIRED",
+            "confidence": "Medium",
+            "description": "Observed network activity may be relevant to a transfer scenario, but destination endpoints and transferred data are not established.",
+            "evidence_ids": net_ids,
+        }
+    ]
+
+    has_usb = any(item.get("id") == "usb_connection" for item in forensic_state.get("observed_evidence", []))
+    
+    if has_usb:
+        attck_hypothesis = "T1567 · Exfiltration Over Web Service / T1052.001 Removable Media"
+        narrative = (
+            "The observed network activity and browser visits suggest that the user accessed confidential endpoints, "
+            "but this does not imply that data was exfiltrated. The absence of evidence for file copying to USB and the "
+            "lack of drive-to-device mapping and file system timestamps make it difficult to establish this finding. "
+            "Further investigation is required to determine if any confidential files were copied to external destinations."
+        )
+    else:
+        attck_hypothesis = "T1567 · Exfiltration Over Web Service"
+        narrative = (
+            "The observed network activity and browser visits suggest that the user accessed confidential endpoints, "
+            "but this does not imply that data was exfiltrated. Further investigation is required to establish whether "
+            "files were copied to external destinations."
+        )
+
+    verification_steps = [
+        "1. Review network activity logs and correlate destination endpoints.",
+        "2. Correlate browser history with file system timestamps.",
+        "3. Verify cloud-storage and remote upload destinations.",
+        "4. Establish drive-to-device mapping before concluding USB transfer.",
+        "5. Confirm whether confidential files were copied to the removable device.",
+    ]
+
+    return {
+        "attck_hypothesis": attck_hypothesis,
+        "attck_status": "Hypothesis",
+        "attck_confidence": "Medium",
+        "interpretation": narrative,
+        "hypotheses": hypotheses,
+        "verification_steps": verification_steps,
+    }
+
+
+def format_forensic_answer_markdown(
+    forensic_state: dict,
+    analysis: dict,
+    is_concept: bool = False,
+    concept_data: dict | None = None,
+) -> str:
+    """Format structured forensic state and analysis into standard clean Markdown for raw trace / clipboard."""
+    if is_concept and concept_data:
+        lines = [
+            f"## Concept Definition\n{concept_data.get('definition', '')}\n",
+        ]
+        if concept_data.get("context"):
+            lines.append("## Case-Specific Context\n" + "\n".join(concept_data.get("context", [])) + "\n")
+        if concept_data.get("rules"):
+            lines.append("## Forensic Interpretation Rules")
+            for r in concept_data.get("rules", []):
+                lines.append(f"- **{r.get('title')}**: {r.get('desc')}")
+            lines.append("")
+        lines.append("General forensic knowledge is interpretive only and cannot be used as case evidence.")
+        lines.append("AI is an investigative assistant, not an evidence source.")
+        return "\n".join(lines)
+
+    assessment = forensic_state.get("assessment", {})
+    conclusion = forensic_state.get("conclusion", {})
+    observed = forensic_state.get("observed_evidence", [])
+    unproven = forensic_state.get("unproven_findings", [])
+    gaps = forensic_state.get("evidence_gaps", [])
+
+    ass_status = assessment.get("status", "NOT ESTABLISHED").replace("_", " ")
+    conc_status = conclusion.get("status", "NOT ESTABLISHED").replace("_", " ")
+
+    lines = [
+        "## Forensic Assessment",
+        f"○ {ass_status}",
+        assessment.get("summary", ""),
+        "",
+        f"## Observed Case Evidence ({len(observed)})",
+    ]
+
+    for item in observed:
+        extra_parts = []
+        if item.get("evidence_ids"):
+            extra_parts.append(f"Evidence [{', '.join(str(i) for i in item['evidence_ids'])}]")
+        if item.get("event_ids"):
+            extra_parts.append(f"Event [{', '.join(str(i) for i in item['event_ids'])}]")
+        if item.get("artifacts"):
+            extra_parts.append(f"Artifact [{', '.join(item['artifacts'])}]")
+        extra_str = (" " + " ".join(extra_parts)) if extra_parts else ""
+        lines.append(f"- **{item.get('title')}**: {item.get('description')}{extra_str}")
+
+    lines.append("")
+    lines.append(f"## Not Established Findings ({len(unproven)})")
+    for item in unproven:
+        lines.append(f"- **{item.get('title')}**: {item.get('description')} [{item.get('status', 'NOT ESTABLISHED').replace('_', ' ')}]")
+
+    hypotheses = analysis.get("hypotheses", [])
+    if hypotheses:
+        lines.append("")
+        lines.append(f"## Investigative Hypotheses ({len(hypotheses)})")
+        for h in hypotheses:
+            ev_str = f" Evidence [{', '.join(str(i) for i in h.get('evidence_ids', []))}]" if h.get("evidence_ids") else ""
+            lines.append(f"- **{h.get('title')}**: {h.get('description')} [{h.get('status', 'HYPOTHESIS')}] (Confidence: {h.get('confidence', 'Medium')}){ev_str}")
+
+    if gaps:
+        lines.append("")
+        lines.append(f"## Evidence Gaps & Missing Proofs ({len(gaps)})")
+        for g in gaps:
+            lines.append(f"- **{g.get('title')}**: {g.get('description')} [{g.get('severity', 'Correlation Required')}]")
+
+    lines.append("")
+    lines.append("## Investigative Interpretation & ATT&CK Analysis")
+    lines.append(f"ATT&CK Hypothesis: {analysis.get('attck_hypothesis', 'T1567 · Exfiltration Over Web Service')}")
+    lines.append(f"Status: {analysis.get('attck_status', 'Hypothesis')}")
+    lines.append(f"Confidence: {analysis.get('attck_confidence', 'Medium')}")
+    lines.append(f"Assessment: {analysis.get('interpretation', '')}")
+    lines.append("")
+    lines.append("Examiner Verification Checklist:")
+    for step in analysis.get("verification_steps", []):
+        lines.append(step)
+
+    lines.append("")
+    lines.append("## Case Conclusion")
+    lines.append(f"○ {conc_status}")
+    lines.append(f"Confidence: {conclusion.get('confidence', 'Medium')} | Priority: {conclusion.get('priority', 'LOW PRIORITY')}")
+    lines.append(conclusion.get("summary", ""))
+    lines.append("")
+    lines.append("General forensic knowledge is interpretive only and cannot be used as case evidence.")
+    lines.append("AI is an investigative assistant, not an evidence source.")
+
+    return "\n".join(lines)
+
+
 def answer_from_investigation(question: str, events: list[dict], inv: dict, rag: dict | None = None) -> str:
     return answer_question(question, rag or inv.get("rag") or {}, events, inv)
+

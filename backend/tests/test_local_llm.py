@@ -229,3 +229,98 @@ def test_api_llm_status_endpoint():
     data = resp.json()
     assert data["model"] == "llama3.2:3b"
     assert "100% Local" in data["privacy"]
+
+
+def test_canonical_forensic_state_engine_consistency(test_case_state, test_events):
+    """Verify Rule 1 & Rule 2: LLM and Fallback produce the exact same canonical forensic_state."""
+    # 1. Fallback execution
+    fallback_res = generate_chat_response(
+        question="Was confidential data copied to USB?",
+        events=test_events,
+        inv=test_case_state,
+        rag={},
+        base_url="http://127.0.0.1:59999",
+    )
+
+    # 2. Mocked Ollama neural execution
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "message": {
+            "role": "assistant",
+            "content": "ATT&CK Hypothesis: T1567 · Exfiltration Over Web Service\nStatus: Hypothesis\nConfidence: Medium\nAssessment: Neural interpretation text.\n\nExaminer Verification Checklist:\n1. Step one.\n2. Step two.",
+        }
+    }
+
+    with patch("httpx.Client.post", return_value=mock_resp):
+        llm_res = generate_chat_response(
+            question="Was confidential data copied to USB?",
+            events=test_events,
+            inv=test_case_state,
+            rag={},
+            model="llama3.2:3b",
+        )
+
+    assert fallback_res["forensic_state"] is not None
+    assert llm_res["forensic_state"] is not None
+
+    # Verify IDENTICAL forensic_state across both engines
+    assert fallback_res["forensic_state"] == llm_res["forensic_state"]
+    assert fallback_res["forensic_state"]["assessment"]["status"] == "NOT_ESTABLISHED"
+    assert len(fallback_res["forensic_state"]["observed_evidence"]) == len(llm_res["forensic_state"]["observed_evidence"])
+    assert len(fallback_res["forensic_state"]["unproven_findings"]) == len(llm_res["forensic_state"]["unproven_findings"])
+    assert len(fallback_res["forensic_state"]["evidence_gaps"]) == len(llm_res["forensic_state"]["evidence_gaps"])
+
+
+def test_canonical_state_deduplication_usb(test_case_state):
+    """Verify Rule 3: Multiple USB artifacts are deduplicated into ONE single observed finding with separated chips."""
+    from app.services.investigation import build_canonical_forensic_state
+
+    # 4 distinct USB artifacts from different sources
+    usb_events = [
+        {"id": 4, "source_type": "windows_event", "event_type": "usb", "description": "USB mass storage inserted VID_0781", "event_id": "json_2"},
+        {"id": 12, "source_type": "windows_event", "event_type": "usb", "description": "USB device removed SanDisk Ultra", "event_id": "json_6"},
+        {"id": 27, "source_type": "windows_event", "event_type": "usb_connect", "description": "Windows Event 6416: New external device recognized", "event_id": "6416"},
+        {"id": 28, "source_type": "registry", "event_type": "usb_history", "description": "Registry artifact Key: USBSTOR VID_0781", "target": "SanDisk"},
+    ]
+
+    state = build_canonical_forensic_state(usb_events, test_case_state, "Was USB connected?")
+    observed = state["observed_evidence"]
+
+    # Must be deduplicated into EXACTLY ONE USB item
+    usb_items = [item for item in observed if item["id"] == "usb_connection"]
+    assert len(usb_items) == 1
+
+    usb_finding = usb_items[0]
+    assert usb_finding["title"] == "USB Device Connection"
+    # Evidence IDs gathered from all artifacts: [4, 12, 27, 28]
+    assert usb_finding["evidence_ids"] == [4, 12, 27, 28]
+    # Event ID separated: [6416] (NOT inside evidence_ids)
+    assert usb_finding["event_ids"] == [6416]
+    # Artifact tags separated: ['USBSTOR']
+    assert "USBSTOR" in usb_finding["artifacts"]
+
+
+def test_api_chat_endpoint_returns_canonical_forensic_state(db_session):
+    """Verify API chat endpoint returns structured canonical forensic_state and generated_analysis."""
+    app.dependency_overrides[get_db] = lambda: db_session
+    try:
+        client = TestClient(app)
+        case = Case(case_number="CASE-STATE-TEST", title="Test Canonical State", investigator="Lead Examiner")
+        db_session.add(case)
+        db_session.commit()
+        db_session.refresh(case)
+
+        chat_resp = client.post(
+            f"/api/cases/{case.id}/chat",
+            json={"question": "Was confidential data copied to USB?", "model": "llama3.2:3b"},
+        )
+        assert chat_resp.status_code == 200
+        data = chat_resp.json()
+        assert "forensic_state" in data
+        assert "generated_analysis" in data
+        assert data["forensic_state"]["assessment"]["status"] == "NOT_ESTABLISHED"
+        assert len(data["forensic_state"]["evidence_gaps"]) >= 3
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+

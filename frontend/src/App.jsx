@@ -311,6 +311,9 @@ export default function App() {
         llm_mode: r.llm_mode,
         is_local: r.is_local,
         query_type: r.query_type,
+        forensic_state: r.forensic_state || null,
+        generated_analysis: r.generated_analysis || null,
+        concept_data: r.concept_data || null,
       });
     } catch (err) {
       alert("Chat request failed: " + err);
@@ -1235,6 +1238,9 @@ export default function App() {
                       answer={answer}
                       generator={generator}
                       inv={inv}
+                      forensicState={answerMeta?.forensic_state}
+                      generatedAnalysis={answerMeta?.generated_analysis}
+                      conceptData={answerMeta?.concept_data}
                       onFocusEvidence={focusEvidence}
                       viewMode={chatViewMode}
                       setViewMode={setChatViewMode}
@@ -1780,7 +1786,20 @@ function GenerationProvenanceCard({ generator }) {
 }
 
 function parseForensicAnswer(rawText) {
-  if (!rawText) return { isConcept: false, assessmentText: "", assessmentState: null, observedItems: [], notEstablishedItems: [], hypothesisItems: [], gapItems: [], interpretationData: null, contextItems: [], rulesItems: [], disclaimer: "" };
+  if (!rawText) return {
+    isConcept: false,
+    assessmentText: "",
+    assessmentState: null,
+    observedItems: [],
+    notEstablishedItems: [],
+    hypothesisItems: [],
+    gapItems: [],
+    interpretationData: null,
+    contextItems: [],
+    rulesItems: [],
+    conclusionData: null,
+    disclaimer: "General forensic knowledge is interpretive only and cannot be used as case evidence. AI is an investigative assistant, not an evidence source.",
+  };
 
   // Convert escaped markdown into normal clean markdown
   let clean = rawText
@@ -1830,23 +1849,23 @@ function parseForensicAnswer(rawText) {
     .replace(/##\s*Concept Definition:?/gi, "\n\n__SEC_ASSESSMENT__\n")
     .replace(/##\s*Forensic Assessment:?/gi, "\n\n__SEC_ASSESSMENT__\n")
     .replace(/\[?FORENSIC ASSESSMENT\]?:?/gi, "\n\n__SEC_ASSESSMENT__\n")
-    .replace(/##\s*Observed Case Evidence:?/gi, "\n\n__SEC_EVIDENCE__\n")
+    .replace(/##\s*Observed Case Evidence(?:\s*\(\d+\))?:?/gi, "\n\n__SEC_EVIDENCE__\n")
     .replace(/\[?OBSERVED EVIDENCE\]?:?/gi, "\n\n__SEC_EVIDENCE__\n")
+    .replace(/##\s*Not Established(?: \/ Unproven)? Findings(?:\s*\(\d+\))?:?/gi, "\n\n__SEC_UNPROVEN__\n")
     .replace(/##\s*Evidentiary State Breakdown:?/gi, "\n\n__SEC_STATES__\n")
     .replace(/\[?EVIDENTIARY STATE BREAKDOWN\]?:?/gi, "\n\n__SEC_STATES__\n")
-    .replace(/##\s*Evidence Gaps(?: & Missing Evidence)?:?/gi, "\n\n__SEC_GAPS__\n")
+    .replace(/##\s*Investigative Hypotheses(?:\s*\(\d+\))?:?/gi, "\n\n__SEC_HYPOTHESES__\n")
+    .replace(/##\s*Evidence Gaps(?: & Missing Proofs| & Missing Evidence)?(?:\s*\(\d+\))?:?/gi, "\n\n__SEC_GAPS__\n")
     .replace(/\[?EVIDENCE GAPS(?:\s*&\s*UNVERIFIED ASPECTS)?\]?:?/gi, "\n\n__SEC_GAPS__\n")
-    .replace(/##\s*Investigative Interpretation:?/gi, "\n\n__SEC_INTERPRETATION__\n")
+    .replace(/##\s*Investigative Interpretation(?: & ATT&CK Analysis)?:?/gi, "\n\n__SEC_INTERPRETATION__\n")
     .replace(/\[?INVESTIGATIVE INTERPRETATION(?:\s*&\s*ATT&CK ANALYSIS)?\]?:?/gi, "\n\n__SEC_INTERPRETATION__\n")
+    .replace(/##\s*Case Conclusion:?/gi, "\n\n__SEC_CONCLUSION__\n")
     .replace(/##\s*Case-Specific Context:?/gi, "\n\n__SEC_CONTEXT__\n")
     .replace(/\[?CASE-SPECIFIC CONTEXT(?:\s*&\s*EVIDENCE OBSERVATIONS)?\]?:?/gi, "\n\n__SEC_CONTEXT__\n")
     .replace(/##\s*(?:Successful Logon ≠ Unauthorized Access|AUTHENTICATION VS UNAUTHORIZED ACCESS):?/gi, "\n\n__SEC_RULE_AUTH__\n")
     .replace(/##\s*(?:Network Activity ≠ Data Exfiltration|NETWORK ACTIVITY VS EXFILTRATION):?/gi, "\n\n__SEC_RULE_NET__\n")
     .replace(/##\s*(?:USB Connection ≠ Data Exfiltration|USB CONNECTION VS DATA EXFILTRATION):?/gi, "\n\n__SEC_RULE_USB__\n")
-    .replace(/##\s*Important Forensic Note:?/gi, "\n\n__SEC_RULE_NOTE__\n")
-    .replace(/(?<=\))\s*-\s*/g, "\n- ")
-    .replace(/(?<=\.)\s*-\s*/g, "\n- ")
-    .replace(/(?<=\])\s*-\s*/g, "\n- ");
+    .replace(/##\s*Important Forensic Note:?/gi, "\n\n__SEC_RULE_NOTE__\n");
 
   const sections = {};
   const tokens = clean.split(/__SEC_([A-Z_]+)__\n/);
@@ -1861,23 +1880,22 @@ function parseForensicAnswer(rawText) {
     }
   }
 
-  // 1. Assessment Text
+  // 1. Assessment Text & State
   let assessmentText = sections["ASSESSMENT"] || "";
   assessmentText = assessmentText
     .split("\n")
     .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith("Question:") && !l.startsWith("Working classification:") && !l.startsWith("Investigation Priority:") && !l.startsWith("##") && l !== "*" && l !== "**" && l !== "The")
+    .filter((l) => l && !l.startsWith("Question:") && !l.startsWith("Working classification:") && !l.startsWith("Investigation Priority:") && !l.startsWith("##") && l !== "*" && l !== "**" && l !== "The" && !l.startsWith("○") && !l.startsWith("✓"))
     .join("\n")
     .replace(/^\*+\s*/, "")
     .trim();
 
-  let assessmentState = null;
+  let assessmentState = "NOT ESTABLISHED";
   const upper = clean.toUpperCase();
   if (isConcept) {
     assessmentState = "CONCEPT DEFINITION";
-  } else if (upper.includes("NOT ESTABLISHED")) {
+  } else if (upper.includes("NOT ESTABLISHED") || upper.includes("NOT_ESTABLISHED")) {
     assessmentState = "NOT ESTABLISHED";
-    // Ensure clean non-truncated verdict sentence
     if (assessmentText.toLowerCase().includes("copied to usb") || assessmentText.length < 20) {
       assessmentText = "The available evidence does not establish that any confidential file was copied to a USB device.";
     }
@@ -1889,86 +1907,166 @@ function parseForensicAnswer(rawText) {
     assessmentState = "OBSERVED";
   }
 
-  // 2. Parse & Classify Evidence Lines into Observed vs Not Established vs Hypothesis
-  const rawEvLines = ((sections["EVIDENCE"] || "") + "\n" + (sections["STATES"] || ""))
+  // Helper to extract evidence IDs, event IDs, and artifact tags from line
+  const parseLineChips = (line) => {
+    const evMatches = line.match(/Evidence\s*\[?([0-9,\s]+)\]?/i);
+    const eventMatches = line.match(/Event\s*\[?([0-9,\s]+)\]?/i);
+    const artMatches = line.match(/Artifact\s*\[?([A-Za-z0-9_$,\s]+)\]?/i);
+
+    const evidence_ids = evMatches ? (evMatches[1].match(/\d+/g) || []).map(Number) : [];
+    const event_ids = eventMatches ? (eventMatches[1].match(/\d+/g) || []).map(Number) : [];
+    const artifacts = artMatches ? artMatches[1].split(",").map((s) => s.trim()).filter(Boolean) : [];
+
+    let cleanDesc = line
+      .replace(/Evidence\s*\[?[0-9,\s]+\]?/gi, "")
+      .replace(/Event\s*\[?[0-9,\s]+\]?/gi, "")
+      .replace(/Artifact\s*\[?[A-Za-z0-9_$,\s]+\]?/gi, "")
+      .replace(/\[\s*(NOT ESTABLISHED|OBSERVED|HYPOTHESIS[^\s\]]*)\s*\]/gi, "")
+      .trim();
+
+    return { evidence_ids, event_ids, artifacts, cleanDesc };
+  };
+
+  // 2. Parse Observed Items & Deduplicate
+  const rawEvLines = (sections["EVIDENCE"] || "")
     .split("\n")
     .map((l) => l.replace(/^[-•✓*]\s*/, "").replace(/^\*+\s*/, "").trim())
     .filter((l) => l && l !== "##" && l !== "#" && l !== "*" && l !== "**" && l !== "The");
 
-  const observedItems = [];
-  const notEstablishedItems = [];
-  const hypothesisItems = [];
-
+  const observedMap = new Map();
   for (const line of rawEvLines) {
     const low = line.toLowerCase();
     const parts = line.split(":");
-    let title = parts[0] ? parts[0].trim() : line;
-    let desc = parts.slice(1).join(":").trim();
+    let title = parts[0] ? parts[0].replace(/\*\*/g, "").trim() : line;
+    let desc = parts.slice(1).join(":").replace(/\*\*/g, "").trim() || title;
 
-    // Specific clean formatting for forensic categories
+    const { evidence_ids, event_ids, artifacts, cleanDesc } = parseLineChips(desc);
+
+    let key = title.toLowerCase();
     if (low.includes("user authentication") || low.includes("4624") || low.includes("logon")) {
+      key = "auth";
       title = "User Authentication";
       desc = "Successful Windows logon observed (Windows Event 4624).";
-      observedItems.push({ title, desc, raw: line });
     } else if (low.includes("network") || low.includes("browser") || low.includes("chrome") || low.includes("10.0.0")) {
-      if (low.includes("possible") || low.includes("hypothesis") || low.includes("transfer")) {
-        title = "Possible Network-Based Transfer";
-        desc = "Observed network activity may be relevant to a transfer scenario, but destination endpoints and transferred data are not established.";
-        hypothesisItems.push({ title, desc, raw: line });
-      } else {
-        title = "Network & Browser Activity";
-        desc = "Browser visits and network connection flows recorded.";
-        observedItems.push({ title, desc, raw: line });
-      }
-    } else if (low.includes("usb") && !low.includes("none") && !low.includes("not established") && !low.includes("no usb")) {
+      key = "network";
+      title = "Network & Browser Activity";
+      desc = "Browser visits and network connection flows recorded.";
+    } else if (low.includes("usb") && !low.includes("not established") && !low.includes("none") && !low.includes("no usb")) {
+      key = "usb";
       title = "USB Device Connection";
       desc = "Removable storage connection observed (Security Event 6416 / USBSTOR).";
-      observedItems.push({ title, desc, raw: line });
-    } else if (low.includes("unauthorized") || low.includes("unauthorized account use")) {
-      title = "Unauthorized Account Use";
-      desc = "Valid-account authentication observed; unauthorized access is unproven.";
-      notEstablishedItems.push({ title, desc });
-    } else if (low.includes("confidential") || low.includes("copy")) {
-      title = "Confidential File Copying to USB";
-      desc = "No file copy events to removable media recorded in the ingested evidence.";
-      notEstablishedItems.push({ title, desc });
-    } else if (low.includes("exfiltration")) {
-      title = "Data Exfiltration";
-      desc = "No evidence establishing that data was transferred outside the organization.";
-      notEstablishedItems.push({ title, desc });
-    } else if (low.includes("usb") && (low.includes("none") || low.includes("not established") || low.includes("no usb"))) {
-      title = "USB Device Connection";
-      desc = "No supporting USB connection artifact is available in current evidence.";
-      notEstablishedItems.push({ title, desc });
-    } else if (low.includes("[none]") || low.includes("not established")) {
-      notEstablishedItems.push({ title, desc: desc || "Not established by ingested evidence." });
-    } else if (low.includes("possible") || low.includes("hypothesis")) {
-      hypothesisItems.push({ title, desc: desc || "Investigative hypothesis requiring correlation.", raw: line });
+    } else if (low.includes("file access") || low.includes("staging") || low.includes("confidential files")) {
+      key = "file_staging";
+      title = "Sensitive File Access & Staging";
+      desc = "Confidential files and staging archives accessed on the local filesystem.";
     } else {
-      observedItems.push({ title, desc: desc || line, raw: line });
+      desc = cleanDesc || desc;
+    }
+
+    if (observedMap.has(key)) {
+      const existing = observedMap.get(key);
+      existing.evidence_ids = Array.from(new Set([...existing.evidence_ids, ...evidence_ids]));
+      existing.event_ids = Array.from(new Set([...existing.event_ids, ...event_ids]));
+      existing.artifacts = Array.from(new Set([...existing.artifacts, ...artifacts]));
+    } else {
+      observedMap.set(key, {
+        id: key,
+        title,
+        description: desc,
+        evidence_ids,
+        event_ids: event_ids.length ? event_ids : (key === "auth" ? [4624] : key === "usb" ? [6416] : []),
+        artifacts: artifacts.length ? artifacts : (key === "usb" ? ["USBSTOR"] : []),
+      });
     }
   }
+  const observedItems = Array.from(observedMap.values());
 
-  // 3. Parse Gaps items with clean severity labels
+  // 3. Parse Unproven Findings
+  const rawUnprovenLines = ((sections["UNPROVEN"] || "") + "\n" + (sections["STATES"] || ""))
+    .split("\n")
+    .map((l) => l.replace(/^[-•○*]\s*/, "").replace(/^\*+\s*/, "").trim())
+    .filter((l) => l && l !== "##" && l !== "#" && l !== "*" && l !== "**" && l !== "The");
+
+  const unprovenMap = new Map();
+  for (const line of rawUnprovenLines) {
+    const low = line.toLowerCase();
+    if (low.includes("observed") && !low.includes("not established")) continue;
+    const parts = line.split(":");
+    let title = parts[0] ? parts[0].replace(/\*\*/g, "").trim() : line;
+    let desc = parts.slice(1).join(":").replace(/\*\*/g, "").replace(/\[.*?\]/g, "").trim();
+
+    let key = title.toLowerCase();
+    if (low.includes("unauthorized") || low.includes("account use")) {
+      key = "unauth_account";
+      title = "Unauthorized Account Use";
+      desc = "Valid-account authentication observed; unauthorized access is unproven.";
+    } else if (low.includes("confidential") || low.includes("file copy") || low.includes("copying to usb")) {
+      key = "confidential_copy";
+      title = "Confidential File Copying to USB";
+      desc = "No file copy events to removable media recorded in the ingested evidence.";
+    } else if (low.includes("exfiltration")) {
+      key = "data_exfil";
+      title = "Data Exfiltration";
+      desc = "No evidence establishing that data was transferred outside the organization.";
+    } else if (low.includes("usb") && (low.includes("not established") || low.includes("no usb") || low.includes("none"))) {
+      key = "usb_conn";
+      title = "USB Device Connection";
+      desc = "No supporting USB connection artifact is available in current evidence.";
+    }
+
+    if (!unprovenMap.has(key)) {
+      unprovenMap.set(key, {
+        id: key,
+        title,
+        status: "NOT_ESTABLISHED",
+        description: desc || "Not established by ingested evidence.",
+      });
+    }
+  }
+  const notEstablishedItems = Array.from(unprovenMap.values());
+
+  // 4. Parse Hypotheses
+  const rawHypoLines = (sections["HYPOTHESES"] || "")
+    .split("\n")
+    .map((l) => l.replace(/^[-•◐*]\s*/, "").replace(/^\*+\s*/, "").trim())
+    .filter((l) => l && l !== "##" && l !== "#" && l !== "*" && l !== "**" && l !== "The");
+
+  const hypothesisItems = [];
+  for (const line of rawHypoLines) {
+    const parts = line.split(":");
+    let title = parts[0] ? parts[0].replace(/\*\*/g, "").trim() : line;
+    let desc = parts.slice(1).join(":").replace(/\*\*/g, "").trim();
+    const { evidence_ids, cleanDesc } = parseLineChips(desc);
+    hypothesisItems.push({
+      id: "hypo_" + hypothesisItems.length,
+      title: title || "Possible Network-Based Transfer",
+      status: "HYPOTHESIS · CORRELATION REQUIRED",
+      confidence: "Medium",
+      description: cleanDesc || desc || "Investigative hypothesis requiring correlation.",
+      evidence_ids,
+    });
+  }
+
+  // 5. Parse Gaps
   const gapsRaw = sections["GAPS"] || "";
   const gapItems = (gapsRaw.length ? gapsRaw.split("\n") : [
-    "Drive-to-device mapping: The mapping between the USB device and the file system is not established.",
-    "File system timestamps: The timestamps of the file system changes are not available.",
-    "Browser cloud uploads: The uploads to cloud storage are not correlated with the file copying."
+    "Drive-to-Device Mapping: The mapping between the USB device and the file system is not established. [Critical Correlation Gap]",
+    "File System Timestamps: The timestamps of the file system changes are not available. [Missing Temporal Evidence]",
+    "Browser Cloud Uploads: The uploads of sensitive files to cloud storage services are not verified. [Correlation Required]"
   ])
-    .map((l) => l.replace(/^[-•?*]\s*/, "").replace(/^\*+\s*/, "").trim())
+    .map((l) => l.replace(/^[-•⚠*]\s*/, "").replace(/^\*+\s*/, "").trim())
     .filter((l) => l && l !== "##" && l !== "#" && l !== "*" && l !== "**" && l !== "The")
     .map((l) => {
       const parts = l.split(":");
-      let title = parts.length > 1 ? parts[0].trim() : "Correlation Gap";
-      let desc = parts.length > 1 ? parts.slice(1).join(":").trim() : l;
+      let title = parts.length > 1 ? parts[0].replace(/\*\*/g, "").trim() : "Correlation Gap";
+      let desc = parts.length > 1 ? parts.slice(1).join(":").replace(/\*\*/g, "").trim() : l;
       let severity = "Correlation Required";
       const low = (title + " " + desc).toLowerCase();
-      if (low.includes("drive-to-device") || low.includes("mapping")) {
+      if (low.includes("critical") || low.includes("drive-to-device") || low.includes("mapping")) {
         title = "Drive-to-Device Mapping";
         desc = "The mapping between the USB device and the file system is not established.";
         severity = "Critical Correlation Gap";
-      } else if (low.includes("timestamp") || low.includes("time")) {
+      } else if (low.includes("temporal") || low.includes("timestamp") || low.includes("time")) {
         title = "File System Timestamps";
         desc = "The timestamps of the file system changes are not available.";
         severity = "Missing Temporal Evidence";
@@ -1977,18 +2075,18 @@ function parseForensicAnswer(rawText) {
         desc = "The uploads of sensitive files to cloud storage services are not verified.";
         severity = "Correlation Required";
       }
-      return { title, desc, severity };
+      desc = desc.replace(/\[.*?\]/g, "").trim();
+      return { id: title.toLowerCase().replace(/[^a-z0-9]+/g, "_"), title, desc, severity };
     });
 
-  // 4. Interpretation
+  // 6. Parse Interpretation
   const interpRaw = sections["INTERPRETATION"] || "";
   let interpretationData = {
-    hypothesis: "T1567 · Exfiltration Over Web Service",
-    status: "Hypothesis",
-    confidence: "Medium",
-    priority: "HIGH",
-    narrative: "The observed network activity and browser visits suggest that the user accessed confidential endpoints, but this does not imply that data was exfiltrated. Further investigation is required to establish whether files were copied to external destinations.",
-    steps: [
+    attck_hypothesis: "T1567 · Exfiltration Over Web Service",
+    attck_status: "Hypothesis",
+    attck_confidence: "Medium",
+    interpretation: "The observed network activity and browser visits suggest that the user accessed confidential endpoints, but this does not imply that data was exfiltrated. Further investigation is required to establish whether files were copied to external destinations.",
+    verification_steps: [
       "1. Review network activity logs and correlate destination endpoints.",
       "2. Correlate browser history with file system timestamps.",
       "3. Verify cloud-storage and remote upload destinations.",
@@ -1999,55 +2097,69 @@ function parseForensicAnswer(rawText) {
 
   if (interpRaw) {
     let narrative = interpRaw;
-    let attackMapping = "";
-    let steps = [];
-
-    const stepIdx = narrative.search(/Examiner verification steps:?/i);
+    const stepIdx = narrative.search(/Examiner verification (?:checklist|steps):?/i);
     if (stepIdx !== -1) {
-      const stepsText = narrative.slice(stepIdx).replace(/^Examiner verification steps:?\s*/i, "");
+      const stepsText = narrative.slice(stepIdx).replace(/^Examiner verification (?:checklist|steps):?\s*/i, "");
       narrative = narrative.slice(0, stepIdx).trim();
       const rawSteps = stepsText.split(/(?=\d+\.\s+)/).map((s) => s.trim()).filter((s) => s && s !== "The" && s !== "##");
-      if (rawSteps.length > 0) steps = rawSteps;
+      if (rawSteps.length > 0) interpretationData.verification_steps = rawSteps;
     }
 
-    const attackIdx = narrative.search(/ATT&CK mapping:?/i);
-    if (attackIdx !== -1) {
-      attackMapping = narrative.slice(attackIdx).replace(/^ATT&CK mapping:?\s*/i, "").trim();
-      narrative = narrative.slice(0, attackIdx).trim();
+    const attckMatch = narrative.match(/ATT&CK\s*Hypothesis:\s*([^\n]+)/i);
+    if (attckMatch) {
+      interpretationData.attck_hypothesis = attckMatch[1].trim();
+      narrative = narrative.replace(/ATT&CK\s*Hypothesis:[^\n]+/i, "").trim();
     }
-
-    if (narrative.trim()) {
-      interpretationData.narrative = narrative.replace(/^The\s*$/gm, "").trim();
+    const statusMatch = narrative.match(/Status:\s*([^\n]+)/i);
+    if (statusMatch) {
+      interpretationData.attck_status = statusMatch[1].trim();
+      narrative = narrative.replace(/Status:[^\n]+/i, "").trim();
     }
-    if (attackMapping) {
-      interpretationData.hypothesis = attackMapping;
+    const confMatch = narrative.match(/Confidence:\s*([^\n]+)/i);
+    if (confMatch) {
+      interpretationData.attck_confidence = confMatch[1].trim();
+      narrative = narrative.replace(/Confidence:[^\n]+/i, "").trim();
     }
-    if (steps.length > 0) {
-      interpretationData.steps = steps;
+    const assessMatch = narrative.match(/Assessment:\s*([^\n]+(?:\n[^\n#]+)*)/i);
+    if (assessMatch) {
+      interpretationData.interpretation = assessMatch[1].trim();
+    } else if (narrative.trim()) {
+      interpretationData.interpretation = narrative.trim();
     }
   }
 
-  // 5. Context items (for Concept definitions)
+  // 7. Parse Conclusion
+  const concRaw = sections["CONCLUSION"] || "";
+  let conclusionData = {
+    status: assessmentState,
+    confidence: interpretationData.attck_confidence || "Medium",
+    priority: "LOW PRIORITY",
+    summary: "The currently ingested evidence does not establish that confidential data was copied to a USB device.",
+  };
+  if (concRaw) {
+    const lines = concRaw.split("\n").map((s) => s.trim()).filter(Boolean);
+    if (lines.length > 0) {
+      const first = lines[0].replace(/^[○✓*]\s*/, "");
+      if (first.includes("NOT ESTABLISHED")) conclusionData.status = "NOT ESTABLISHED";
+      else if (first.includes("OBSERVED")) conclusionData.status = "OBSERVED";
+    }
+    if (lines.length > 2) {
+      conclusionData.summary = lines[lines.length - 1];
+    }
+  }
+
+  // Context & Rules (for concepts)
   const contextRaw = sections["CONTEXT"] || "";
   const contextItems = contextRaw
     .split("\n")
     .map((l) => l.replace(/^[-\u2022*]\s*/, "").replace(/^\*+\s*/, "").trim())
     .filter((l) => l && l !== "*" && l !== "**" && l !== "##");
 
-  // 6. Forensic Interpretation Rules Callouts
   const rulesItems = [];
-  if (sections["RULE_NET"]) {
-    rulesItems.push({ title: "Network Activity ≠ Data Exfiltration", desc: sections["RULE_NET"], icon: "net" });
-  }
-  if (sections["RULE_AUTH"]) {
-    rulesItems.push({ title: "Successful Logon ≠ Unauthorized Access", desc: sections["RULE_AUTH"], icon: "auth" });
-  }
-  if (sections["RULE_USB"]) {
-    rulesItems.push({ title: "USB Connection ≠ Data Exfiltration", desc: sections["RULE_USB"], icon: "usb" });
-  }
-  if (sections["RULE_NOTE"]) {
-    rulesItems.push({ title: "Important Forensic Note", desc: sections["RULE_NOTE"], icon: "note" });
-  }
+  if (sections["RULE_NET"]) rulesItems.push({ title: "Network Activity ≠ Data Exfiltration", desc: sections["RULE_NET"], icon: "net" });
+  if (sections["RULE_AUTH"]) rulesItems.push({ title: "Successful Logon ≠ Unauthorized Access", desc: sections["RULE_AUTH"], icon: "auth" });
+  if (sections["RULE_USB"]) rulesItems.push({ title: "USB Connection ≠ Data Exfiltration", desc: sections["RULE_USB"], icon: "usb" });
+  if (sections["RULE_NOTE"]) rulesItems.push({ title: "Important Forensic Note", desc: sections["RULE_NOTE"], icon: "note" });
 
   return {
     isConcept,
@@ -2060,84 +2172,121 @@ function parseForensicAnswer(rawText) {
     interpretationData,
     contextItems,
     rulesItems,
+    conclusionData,
     disclaimer,
   };
 }
 
-function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMode, setViewMode }) {
-  if (!answer) return null;
+function ForensicConsoleAnswer({
+  answer,
+  generator,
+  inv,
+  forensicState,
+  generatedAnalysis,
+  conceptData,
+  onFocusEvidence,
+  viewMode,
+  setViewMode,
+}) {
+  if (!answer && !forensicState) return null;
 
   const parsed = parseForensicAnswer(answer);
-  const {
-    isConcept,
-    assessmentText,
-    assessmentState,
-    observedItems,
-    notEstablishedItems,
-    hypothesisItems,
-    gapItems,
-    interpretationData,
-    contextItems,
-    rulesItems,
-    disclaimer,
-  } = parsed;
 
-  const renderEvidenceChips = (rawStr) => {
-    if (!rawStr) return null;
-    const ids = rawStr.match(/\d+/g);
-    if (!ids || !ids.length) return null;
-    return (
-      <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.4 }}>
-        <span style={{ fontSize: "10.5px", color: "#64748b", fontWeight: 700, marginRight: "2px" }}>Evidence</span>
-        {ids.map((id, i) => (
-          <Box
-            component="button"
-            key={i}
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (onFocusEvidence) onFocusEvidence(id);
-            }}
-            title={`Click to focus Artifact #${id} in Timeline`}
-            sx={{
-              cursor: "pointer",
-              border: "1px solid #0288d1",
-              bgcolor: "#0b263e",
-              color: "#38bdf8",
-              fontFamily: "IBM Plex Mono",
-              fontSize: 10.5,
-              fontWeight: 700,
-              px: 0.8,
-              py: 0.15,
-              borderRadius: 1,
-              display: "inline-flex",
-              alignItems: "center",
-              "&:hover": {
-                bgcolor: "#0288d1",
-                color: "#fff",
-                transform: "translateY(-1px)",
-              },
-              transition: "all 0.15s ease",
-            }}
-          >
-            #{id}
-          </Box>
-        ))}
-      </Stack>
-    );
+  const isConcept = Boolean(
+    conceptData ||
+    forensicState?.assessment?.status === "CONCEPT DEFINITION" ||
+    forensicState?.conclusion?.status === "CONCEPT DEFINITION" ||
+    parsed.isConcept
+  );
+
+  const assessmentText =
+    forensicState?.assessment?.summary ||
+    conceptData?.definition ||
+    parsed.assessmentText ||
+    "The available evidence does not establish that any confidential file was copied to a USB device.";
+
+  const assessmentState =
+    forensicState?.assessment?.status?.replace(/_/g, " ") ||
+    parsed.assessmentState ||
+    (isConcept ? "CONCEPT DEFINITION" : "NOT ESTABLISHED");
+
+  const observedItems =
+    forensicState?.observed_evidence && forensicState.observed_evidence.length > 0
+      ? forensicState.observed_evidence
+      : parsed.observedItems;
+
+  const notEstablishedItems =
+    forensicState?.unproven_findings && forensicState.unproven_findings.length > 0
+      ? forensicState.unproven_findings
+      : parsed.notEstablishedItems;
+
+  const hypothesisItems =
+    generatedAnalysis?.hypotheses && generatedAnalysis.hypotheses.length > 0
+      ? generatedAnalysis.hypotheses
+      : parsed.hypothesisItems;
+
+  const gapItems =
+    forensicState?.evidence_gaps && forensicState.evidence_gaps.length > 0
+      ? forensicState.evidence_gaps
+      : parsed.gapItems;
+
+  const interpretationData = {
+    attck_hypothesis:
+      generatedAnalysis?.attck_hypothesis ||
+      parsed.interpretationData?.attck_hypothesis ||
+      "T1567 · Exfiltration Over Web Service",
+    attck_status:
+      generatedAnalysis?.attck_status ||
+      parsed.interpretationData?.attck_status ||
+      "Hypothesis",
+    attck_confidence:
+      generatedAnalysis?.attck_confidence ||
+      parsed.interpretationData?.attck_confidence ||
+      "Medium",
+    interpretation:
+      generatedAnalysis?.interpretation ||
+      parsed.interpretationData?.interpretation ||
+      "The observed network activity and browser visits suggest that the user accessed confidential endpoints, but this does not imply that data was exfiltrated. Further investigation is required to establish whether files were copied to external destinations.",
+    verification_steps:
+      generatedAnalysis?.verification_steps && generatedAnalysis.verification_steps.length > 0
+        ? generatedAnalysis.verification_steps
+        : parsed.interpretationData?.verification_steps || [],
   };
+
+  const conclusionData = {
+    status:
+      forensicState?.conclusion?.status?.replace(/_/g, " ") ||
+      parsed.conclusionData?.status ||
+      assessmentState,
+    confidence:
+      forensicState?.conclusion?.confidence ||
+      interpretationData.attck_confidence ||
+      "Medium",
+    priority:
+      forensicState?.conclusion?.priority ||
+      inv?.priority ||
+      (inv?.risk_score >= 40 ? "HIGH PRIORITY" : "LOW PRIORITY"),
+    summary:
+      forensicState?.conclusion?.summary ||
+      parsed.conclusionData?.summary ||
+      "The currently ingested evidence does not establish that confidential data was copied to a USB device.",
+  };
+
+  const contextItems = conceptData?.context || parsed.contextItems || [];
+  const rulesItems = conceptData?.rules || parsed.rulesItems || [];
+  const disclaimer = parsed.disclaimer;
 
   const highlightEvidence = (text) => {
     if (!text) return null;
     const str = String(text);
-    const parts = str.split(/(Evidence\s+IDs?:\s*\[?[0-9,\s]+\]?|evidence_ids=\[?[0-9,\s]+\]?|\[Evidence\s+IDs?:\s*[0-9,\s]+\])/gi);
+    const parts = str.split(/(Evidence\s*\[?[0-9,\s]+\]?|Event\s*\[?[0-9,\s]+\]?|Artifact\s*\[?[A-Za-z0-9_$,\s]+\]?)/gi);
     return parts.map((part, idx) => {
-      if (/Evidence\s+IDs?|evidence_ids/i.test(part)) {
+      if (/Evidence\s*\[?[0-9,\s]+\]?/i.test(part)) {
         const idMatches = part.match(/\d+/g);
         if (idMatches && idMatches.length) {
           return (
             <Box key={idx} component="span" sx={{ display: "inline-flex", alignItems: "center", mx: 0.3 }}>
-              <span style={{ fontSize: "11px", color: "#64748b", marginRight: "3px" }}>Evidence</span>
+              <span style={{ fontSize: "10.5px", color: "#64748b", fontWeight: 700, marginRight: "2px" }}>Evidence</span>
               {idMatches.map((id, i) => (
                 <Box
                   component="button"
@@ -2312,7 +2461,7 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
           </Paper>
         </Box>
       ) : (
-        /* Render Simplified Case Investigation View */
+        /* Render Unified Case Investigation View */
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.6 }}>
           {/* Primary Assessment / Verdict Card */}
           <Paper
@@ -2344,7 +2493,7 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
             </Typography>
           </Paper>
 
-          {/* 1. OBSERVED EVIDENCE (Clean subtle dark background with green left accent) */}
+          {/* 1. OBSERVED CASE EVIDENCE (Deduplicated with separate Evidence, Event, and Artifact chips) */}
           {observedItems.length > 0 && (
             <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
               <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#34d399", fontSize: 11.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.8, mb: 1 }}>
@@ -2354,14 +2503,111 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
                 {observedItems.map((item, idx) => (
                   <Box key={idx} sx={{ p: 1.2, bgcolor: "#06131d", borderLeft: "3px solid #10b981", borderRadius: "0 6px 6px 0" }}>
                     <Typography variant="subtitle2" sx={{ color: "#e2e8f0", fontSize: 12.5, fontWeight: 700 }}>
-                      {highlightEvidence(item.title)}
+                      {item.title}
                     </Typography>
-                    {item.desc && item.desc !== item.title && (
+                    {item.description && (
                       <Typography variant="body2" sx={{ color: "#94a3b8", fontSize: 12, mt: 0.2 }}>
-                        {highlightEvidence(item.desc)}
+                        {item.description}
                       </Typography>
                     )}
-                    {item.raw && renderEvidenceChips(item.raw)}
+
+                    {/* Metadata Chips: Evidence IDs, Windows Event IDs, Artifact tags */}
+                    <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.8 }}>
+                      {/* Evidence IDs Chips */}
+                      {item.evidence_ids && item.evidence_ids.length > 0 && (
+                        <Stack direction="row" spacing={0.5} alignItems="center">
+                          <Typography variant="caption" sx={{ fontSize: 10, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                            Evidence
+                          </Typography>
+                          {item.evidence_ids.map((id) => (
+                            <Box
+                              component="button"
+                              key={`ev-${id}`}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (onFocusEvidence) onFocusEvidence(id);
+                              }}
+                              title={`Click to focus Artifact #${id} in Timeline`}
+                              sx={{
+                                cursor: "pointer",
+                                border: "1px solid #0288d1",
+                                bgcolor: "#0b263e",
+                                color: "#38bdf8",
+                                fontFamily: "IBM Plex Mono",
+                                fontSize: 10.5,
+                                fontWeight: 700,
+                                px: 0.8,
+                                py: 0.15,
+                                borderRadius: 1,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                "&:hover": {
+                                  bgcolor: "#0288d1",
+                                  color: "#fff",
+                                  transform: "translateY(-1px)",
+                                },
+                                transition: "all 0.15s ease",
+                              }}
+                            >
+                              #{id}
+                            </Box>
+                          ))}
+                        </Stack>
+                      )}
+
+                      {/* Event IDs Chips (e.g. 4624, 6416) */}
+                      {item.event_ids && item.event_ids.length > 0 && (
+                        <Stack direction="row" spacing={0.5} alignItems="center">
+                          <Typography variant="caption" sx={{ fontSize: 10, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                            Event
+                          </Typography>
+                          {item.event_ids.map((eid) => (
+                            <Chip
+                              key={`event-${eid}`}
+                              size="small"
+                              label={eid}
+                              sx={{
+                                height: 18,
+                                fontSize: 10,
+                                fontWeight: 700,
+                                fontFamily: "IBM Plex Mono",
+                                bgcolor: "#1e293b",
+                                color: "#cbd5e1",
+                                border: "1px solid #475569",
+                                borderRadius: 1,
+                              }}
+                            />
+                          ))}
+                        </Stack>
+                      )}
+
+                      {/* Artifact Tags Chips (e.g. USBSTOR) */}
+                      {item.artifacts && item.artifacts.length > 0 && (
+                        <Stack direction="row" spacing={0.5} alignItems="center">
+                          <Typography variant="caption" sx={{ fontSize: 10, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                            Artifact
+                          </Typography>
+                          {item.artifacts.map((art) => (
+                            <Chip
+                              key={`art-${art}`}
+                              size="small"
+                              label={art}
+                              sx={{
+                                height: 18,
+                                fontSize: 10,
+                                fontWeight: 700,
+                                fontFamily: "IBM Plex Mono",
+                                bgcolor: "#142534",
+                                color: "#38bdf8",
+                                border: "1px solid #0369a1",
+                                borderRadius: 1,
+                              }}
+                            />
+                          ))}
+                        </Stack>
+                      )}
+                    </Stack>
                   </Box>
                 ))}
               </Stack>
@@ -2379,13 +2625,17 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
                   <Box key={idx} sx={{ p: 1.2, bgcolor: "#0b131e", borderLeft: "3px solid #475569", borderRadius: "0 6px 6px 0" }}>
                     <Stack direction="row" justifyContent="space-between" alignItems="center">
                       <Typography variant="subtitle2" sx={{ color: "#cbd5e1", fontSize: 12.5, fontWeight: 700 }}>
-                        {highlightEvidence(item.title)}
+                        {item.title}
                       </Typography>
-                      <Chip size="small" label="NOT ESTABLISHED" sx={{ height: 18, fontSize: 9, fontWeight: 800, bgcolor: "#1e293b", color: "#94a3b8", border: "1px solid #334155" }} />
+                      <Chip
+                        size="small"
+                        label={item.status ? item.status.replace(/_/g, " ") : "NOT ESTABLISHED"}
+                        sx={{ height: 18, fontSize: 9, fontWeight: 800, bgcolor: "#1e293b", color: "#94a3b8", border: "1px solid #334155" }}
+                      />
                     </Stack>
-                    {item.desc && (
+                    {item.description && (
                       <Typography variant="body2" sx={{ color: "#64748b", fontSize: 12, mt: 0.3 }}>
-                        {highlightEvidence(item.desc)}
+                        {item.description}
                       </Typography>
                     )}
                   </Box>
@@ -2405,16 +2655,59 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
                   <Box key={idx} sx={{ p: 1.2, bgcolor: "#131c18", borderLeft: "3px solid #d97706", borderRadius: "0 6px 6px 0" }}>
                     <Stack direction="row" justifyContent="space-between" alignItems="center">
                       <Typography variant="subtitle2" sx={{ color: "#fde68a", fontSize: 12.5, fontWeight: 700 }}>
-                        {highlightEvidence(item.title)}
+                        {item.title}
                       </Typography>
-                      <Chip size="small" label="HYPOTHESIS · CORRELATION REQUIRED" sx={{ height: 18, fontSize: 9, fontWeight: 800, bgcolor: "#382404", color: "#fbbf24", border: "1px solid #d97706" }} />
+                      <Chip
+                        size="small"
+                        label={item.status || "HYPOTHESIS · CORRELATION REQUIRED"}
+                        sx={{ height: 18, fontSize: 9, fontWeight: 800, bgcolor: "#382404", color: "#fbbf24", border: "1px solid #d97706" }}
+                      />
                     </Stack>
-                    {item.desc && (
+                    {item.description && (
                       <Typography variant="body2" sx={{ color: "#d97706", fontSize: 12, mt: 0.3 }}>
-                        {highlightEvidence(item.desc)}
+                        {item.description}
                       </Typography>
                     )}
-                    {item.raw && renderEvidenceChips(item.raw)}
+                    {item.evidence_ids && item.evidence_ids.length > 0 && (
+                      <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.6 }}>
+                        <Typography variant="caption" sx={{ fontSize: 10, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                          Evidence
+                        </Typography>
+                        {item.evidence_ids.map((id) => (
+                          <Box
+                            component="button"
+                            key={`hypo-ev-${id}`}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onFocusEvidence) onFocusEvidence(id);
+                            }}
+                            title={`Click to focus Artifact #${id} in Timeline`}
+                            sx={{
+                              cursor: "pointer",
+                              border: "1px solid #0288d1",
+                              bgcolor: "#0b263e",
+                              color: "#38bdf8",
+                              fontFamily: "IBM Plex Mono",
+                              fontSize: 10.5,
+                              fontWeight: 700,
+                              px: 0.8,
+                              py: 0.15,
+                              borderRadius: 1,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              "&:hover": {
+                                bgcolor: "#0288d1",
+                                color: "#fff",
+                              },
+                              transition: "all 0.15s ease",
+                            }}
+                          >
+                            #{id}
+                          </Box>
+                        ))}
+                      </Stack>
+                    )}
                   </Box>
                 ))}
               </Stack>
@@ -2432,13 +2725,17 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
                   <Box key={idx} sx={{ p: 1.2, bgcolor: "#15130b", borderLeft: "3px solid #b45309", borderRadius: "0 6px 6px 0" }}>
                     <Stack direction="row" justifyContent="space-between" alignItems="center">
                       <Typography variant="subtitle2" sx={{ color: "#fde68a", fontSize: 12.5, fontWeight: 700 }}>
-                        {highlightEvidence(item.title)}
+                        {item.title}
                       </Typography>
-                      <Chip size="small" label={item.severity} sx={{ height: 18, fontSize: 9, fontWeight: 800, bgcolor: "#2d1f05", color: "#f59e0b", border: "1px solid #92400e" }} />
+                      <Chip
+                        size="small"
+                        label={item.severity || "Correlation Required"}
+                        sx={{ height: 18, fontSize: 9, fontWeight: 800, bgcolor: "#2d1f05", color: "#f59e0b", border: "1px solid #92400e" }}
+                      />
                     </Stack>
-                    {item.desc && item.desc !== item.title && (
+                    {item.description && item.description !== item.title && (
                       <Typography variant="body2" sx={{ color: "#d97706", fontSize: 12, mt: 0.3 }}>
-                        {highlightEvidence(item.desc)}
+                        {item.description}
                       </Typography>
                     )}
                   </Box>
@@ -2461,37 +2758,37 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
                       ATT&CK HYPOTHESIS
                     </Typography>
                     <Typography variant="subtitle2" sx={{ color: "#38bdf8", fontWeight: 700, fontSize: 13, my: 0.4 }}>
-                      {interpretationData.hypothesis}
+                      {interpretationData.attck_hypothesis}
                     </Typography>
                     <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
-                      <Chip size="small" label={`Status: ${interpretationData.status}`} sx={{ bgcolor: "#1e293b", color: "#fde68a", border: "1px solid #d97706", fontWeight: 700, fontSize: 10 }} />
-                      <Chip size="small" label={`Confidence: ${interpretationData.confidence}`} sx={{ bgcolor: "#112a45", color: "#7dd3fc", border: "1px solid #0288d1", fontWeight: 700, fontSize: 10 }} />
+                      <Chip size="small" label={`Status: ${interpretationData.attck_status}`} sx={{ bgcolor: "#1e293b", color: "#fde68a", border: "1px solid #d97706", fontWeight: 700, fontSize: 10 }} />
+                      <Chip size="small" label={`Confidence: ${interpretationData.attck_confidence}`} sx={{ bgcolor: "#112a45", color: "#7dd3fc", border: "1px solid #0288d1", fontWeight: 700, fontSize: 10 }} />
                     </Stack>
                   </Box>
 
                   {/* Assessment Narrative */}
-                  {interpretationData.narrative && (
+                  {interpretationData.interpretation && (
                     <Box sx={{ mt: 0.5, p: 1.2, bgcolor: "#07131e", border: "1px solid #0f2c44", borderRadius: 1.2 }}>
                       <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 800, textTransform: "uppercase", fontSize: 9.5, display: "block", mb: 0.4 }}>
                         ASSESSMENT
                       </Typography>
                       <Typography variant="body2" sx={{ color: "#e2e8f0", fontSize: 12.5, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
-                        {highlightEvidence(interpretationData.narrative)}
+                        {interpretationData.interpretation}
                       </Typography>
                     </Box>
                   )}
 
                   {/* Numbered Examiner Tasks Checklist */}
-                  {interpretationData.steps && interpretationData.steps.length > 0 && (
+                  {interpretationData.verification_steps && interpretationData.verification_steps.length > 0 && (
                     <Box sx={{ mt: 0.8 }}>
                       <Typography variant="caption" sx={{ color: "#7dd3fc", fontWeight: 800, display: "block", mb: 0.6, textTransform: "uppercase", fontSize: 10 }}>
                         EXAMINER VERIFICATION CHECKLIST:
                       </Typography>
                       <Stack spacing={0.6}>
-                        {interpretationData.steps.map((step, idx) => (
+                        {interpretationData.verification_steps.map((step, idx) => (
                           <Paper key={idx} sx={{ p: 0.8, px: 1.2, bgcolor: "#061320", border: "1px solid #143552", borderRadius: 1 }}>
                             <Typography variant="body2" sx={{ color: "#cbd5e1", fontSize: 12, lineHeight: 1.4 }}>
-                              {highlightEvidence(step)}
+                              {step}
                             </Typography>
                           </Paper>
                         ))}
@@ -2521,16 +2818,16 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
               CASE CONCLUSION
             </Typography>
             <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.8 }}>
-              <Typography variant="h6" sx={{ color: assessmentState === "OBSERVED" ? "#34d399" : assessmentState === "NOT ESTABLISHED" ? "#cbd5e1" : "#fbbf24", fontWeight: 800, fontSize: 15 }}>
-                {assessmentState === "NOT ESTABLISHED" ? "○ NOT ESTABLISHED" : assessmentState === "OBSERVED" ? "✓ OBSERVED" : assessmentState || "UNDER EXAMINATION"}
+              <Typography variant="h6" sx={{ color: conclusionData.status === "OBSERVED" ? "#34d399" : conclusionData.status === "NOT ESTABLISHED" ? "#cbd5e1" : "#fbbf24", fontWeight: 800, fontSize: 15 }}>
+                {conclusionData.status === "NOT ESTABLISHED" ? "○ NOT ESTABLISHED" : conclusionData.status === "OBSERVED" ? "✓ OBSERVED" : conclusionData.status || "UNDER EXAMINATION"}
               </Typography>
               <Stack direction="row" spacing={1}>
-                <Chip size="small" label={`Confidence: ${interpretationData?.confidence || "Medium"}`} sx={{ bgcolor: "#0b2840", color: "#81d4fa", fontSize: 10, fontWeight: 700 }} />
-                <Chip size="small" label={inv?.priority || "HIGH PRIORITY"} color={inv?.risk_score >= 40 ? "error" : "warning"} sx={{ fontSize: 10, fontWeight: 700 }} />
+                <Chip size="small" label={`Confidence: ${conclusionData.confidence}`} sx={{ bgcolor: "#0b2840", color: "#81d4fa", fontSize: 10, fontWeight: 700 }} />
+                <Chip size="small" label={conclusionData.priority} color={inv?.risk_score >= 40 ? "error" : "warning"} sx={{ fontSize: 10, fontWeight: 700 }} />
               </Stack>
             </Stack>
             <Typography variant="body2" sx={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.4 }}>
-              The currently ingested evidence does not establish that confidential data was copied to a USB device.
+              {conclusionData.summary}
             </Typography>
           </Paper>
 
