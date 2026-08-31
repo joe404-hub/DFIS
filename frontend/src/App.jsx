@@ -1898,8 +1898,16 @@ function parseForensicAnswer(rawText) {
   for (const line of rawEvLines) {
     const low = line.toLowerCase();
     const parts = line.split(":");
-    const title = parts[0] ? parts[0].trim() : line;
-    const desc = parts.slice(1).join(":").trim();
+    let title = parts[0] ? parts[0].trim() : line;
+    let desc = parts.slice(1).join(":").trim();
+
+    // Clean up contradictory USB connection label when none exists
+    if (title.toLowerCase() === "usb connection" && (low.includes("[none]") || low.includes("no usb device") || low.includes("not established"))) {
+      title = "USB Device Connection";
+      desc = "NOT OBSERVED IN CURRENT EVIDENCE (No device connection records found)";
+      notEstablishedItems.push({ title, desc });
+      continue;
+    }
 
     if (
       low.includes("[none]") ||
@@ -1910,20 +1918,26 @@ function parseForensicAnswer(rawText) {
       low.includes("unauthorized account use") ||
       low.includes("unauthorized access")
     ) {
-      notEstablishedItems.push({ title, desc: desc || "Not established by ingested evidence." });
+      if (!desc || desc.toLowerCase() === "not established") {
+        desc = "No supporting artifact is currently available in the ingested evidence.";
+      }
+      notEstablishedItems.push({ title, desc });
     } else if (
       low.includes("possible") ||
       low.includes("hypothesis") ||
       low.includes("hypothesized") ||
       low.includes("insufficient evidence")
     ) {
-      hypothesisItems.push({ title, desc: desc || "Investigative hypothesis requiring correlation." });
+      if (!desc) {
+        desc = "Investigative hypothesis requiring independent examiner correlation.";
+      }
+      hypothesisItems.push({ title, desc });
     } else {
       observedItems.push({ title, desc: desc || line });
     }
   }
 
-  // 3. Parse Gaps items
+  // 3. Parse Gaps items with clean severity labels
   const gapsRaw = sections["GAPS"] || "";
   const gapItems = gapsRaw
     .split("\n")
@@ -1931,10 +1945,18 @@ function parseForensicAnswer(rawText) {
     .filter((l) => l && l !== "##" && l !== "#" && l !== "*" && l !== "**" && l !== "The")
     .map((l) => {
       const parts = l.split(":");
-      return {
-        title: parts.length > 1 ? parts[0].trim() : "Correlation Gap",
-        desc: parts.length > 1 ? parts.slice(1).join(":").trim() : l,
-      };
+      let title = parts.length > 1 ? parts[0].trim() : "Correlation Gap";
+      let desc = parts.length > 1 ? parts.slice(1).join(":").trim() : l;
+      let severity = "Correlation Required";
+      const low = (title + " " + desc).toLowerCase();
+      if (low.includes("drive-to-device") || low.includes("mapping")) {
+        severity = "Critical Correlation Gap";
+      } else if (low.includes("timestamp") || low.includes("time")) {
+        severity = "Missing Temporal Evidence";
+      } else if (low.includes("hash") || low.includes("cryptographic")) {
+        severity = "Missing Hash Verification";
+      }
+      return { title, desc, severity };
     });
 
   // 4. Interpretation
@@ -1954,7 +1976,7 @@ function parseForensicAnswer(rawText) {
     if (stepIdx !== -1) {
       const stepsText = narrative.slice(stepIdx).replace(/^Examiner verification steps:?\s*/i, "");
       narrative = narrative.slice(0, stepIdx).trim();
-      steps = stepsText.split(/(?=\d+\.\s+)/).map((s) => s.trim()).filter((s) => s && s !== "The");
+      steps = stepsText.split(/(?=\d+\.\s+)/).map((s) => s.trim()).filter((s) => s && s !== "The" && s !== "##");
     }
 
     const attackIdx = narrative.search(/ATT&CK mapping:?/i);
@@ -1983,9 +2005,9 @@ function parseForensicAnswer(rawText) {
     }
 
     interpretationData = {
-      hypothesis: hypothesis || (attackMapping ? `ATT&CK Hypotheses: ${attackMapping}` : "Investigative Hypothesis & ATT&CK Analysis"),
-      status,
-      confidence,
+      hypothesis: hypothesis || (attackMapping ? `ATT&CK Hypothesis: ${attackMapping}` : "Investigative Hypothesis & ATT&CK Analysis"),
+      status: status || "Hypothesis",
+      confidence: confidence || "Medium",
       priority,
       evidence,
       attackMapping,
@@ -2178,10 +2200,10 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.6 }}>
           {/* Concept Explanation Card */}
           <Paper sx={{ p: 2, bgcolor: "#091c2c", border: "1px solid #0288d1", borderRadius: 2 }}>
-            <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 800, textTransform: "uppercase", fontSize: 10, letterSpacing: "0.08em", display: "block", mb: 0.6 }}>
+            <Typography variant="overline" sx={{ color: "#64748b", fontWeight: 800, letterSpacing: "0.1em", fontSize: 10 }}>
               TECHNICAL DEFINITION
             </Typography>
-            <Box sx={{ mb: 1.2 }}>
+            <Box sx={{ my: 0.8 }}>
               <EvidenceStatusBadge status="CONCEPT DEFINITION" />
             </Box>
             <Typography variant="body1" sx={{ color: "#f8fafc", fontSize: 13.5, lineHeight: 1.65, fontWeight: 500, whiteSpace: "pre-wrap" }}>
@@ -2262,10 +2284,10 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
               borderRadius: 2,
             }}
           >
-            <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 800, textTransform: "uppercase", fontSize: 10, letterSpacing: "0.08em", display: "block", mb: 0.6 }}>
+            <Typography variant="overline" sx={{ color: "#64748b", fontWeight: 800, letterSpacing: "0.1em", fontSize: 10.5 }}>
               FORENSIC ASSESSMENT
             </Typography>
-            <Box sx={{ mb: 1.2 }}>
+            <Box sx={{ my: 0.8 }}>
               <EvidenceStatusBadge status={assessmentState} />
             </Box>
             <Typography variant="body1" sx={{ color: "#f8fafc", fontSize: 13.5, lineHeight: 1.65, fontWeight: 500 }}>
@@ -2281,7 +2303,7 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
               </Typography>
               <Stack spacing={0.8}>
                 {observedItems.map((item, idx) => (
-                  <Box key={idx} sx={{ p: 1, bgcolor: "#022419", borderLeft: "3px solid #10b981", borderRadius: "0 6px 6px 0" }}>
+                  <Box key={idx} sx={{ p: 1.2, bgcolor: "#06131d", borderLeft: "3px solid #10b981", borderRadius: "0 6px 6px 0" }}>
                     <Typography variant="subtitle2" sx={{ color: "#e2e8f0", fontSize: 12.5, fontWeight: 700 }}>
                       {highlightEvidence(item.title)}
                     </Typography>
@@ -2296,7 +2318,7 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
             </Box>
           )}
 
-          {/* 2. NOT ESTABLISHED FINDINGS (Muted slate styling with ○ icon) */}
+          {/* 2. NOT ESTABLISHED FINDINGS (Muted slate styling with ○ icon and explicit badge) */}
           {notEstablishedItems.length > 0 && (
             <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
               <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#94a3b8", fontSize: 11.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.8, mb: 1 }}>
@@ -2304,12 +2326,15 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
               </Typography>
               <Stack spacing={0.8}>
                 {notEstablishedItems.map((item, idx) => (
-                  <Box key={idx} sx={{ p: 1, bgcolor: "#0f1722", borderLeft: "3px solid #475569", borderRadius: "0 6px 6px 0" }}>
-                    <Typography variant="subtitle2" sx={{ color: "#cbd5e1", fontSize: 12.5, fontWeight: 700 }}>
-                      {highlightEvidence(item.title)}
-                    </Typography>
+                  <Box key={idx} sx={{ p: 1.2, bgcolor: "#0b131e", borderLeft: "3px solid #475569", borderRadius: "0 6px 6px 0" }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                      <Typography variant="subtitle2" sx={{ color: "#cbd5e1", fontSize: 12.5, fontWeight: 700 }}>
+                        {highlightEvidence(item.title)}
+                      </Typography>
+                      <Chip size="small" label="NOT ESTABLISHED" sx={{ height: 18, fontSize: 9, fontWeight: 800, bgcolor: "#1e293b", color: "#94a3b8", border: "1px solid #334155" }} />
+                    </Stack>
                     {item.desc && (
-                      <Typography variant="body2" sx={{ color: "#64748b", fontSize: 12, mt: 0.2 }}>
+                      <Typography variant="body2" sx={{ color: "#64748b", fontSize: 12, mt: 0.3 }}>
                         {highlightEvidence(item.desc)}
                       </Typography>
                     )}
@@ -2327,12 +2352,15 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
               </Typography>
               <Stack spacing={0.8}>
                 {hypothesisItems.map((item, idx) => (
-                  <Box key={idx} sx={{ p: 1, bgcolor: "#1f1604", borderLeft: "3px solid #d97706", borderRadius: "0 6px 6px 0" }}>
-                    <Typography variant="subtitle2" sx={{ color: "#fde68a", fontSize: 12.5, fontWeight: 700 }}>
-                      {highlightEvidence(item.title)}
-                    </Typography>
+                  <Box key={idx} sx={{ p: 1.2, bgcolor: "#131c18", borderLeft: "3px solid #d97706", borderRadius: "0 6px 6px 0" }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                      <Typography variant="subtitle2" sx={{ color: "#fde68a", fontSize: 12.5, fontWeight: 700 }}>
+                        {highlightEvidence(item.title)}
+                      </Typography>
+                      <Chip size="small" label="HYPOTHESIS · CORRELATION REQUIRED" sx={{ height: 18, fontSize: 9, fontWeight: 800, bgcolor: "#382404", color: "#fbbf24", border: "1px solid #d97706" }} />
+                    </Stack>
                     {item.desc && (
-                      <Typography variant="body2" sx={{ color: "#fbbf24", fontSize: 12, mt: 0.2 }}>
+                      <Typography variant="body2" sx={{ color: "#d97706", fontSize: 12, mt: 0.3 }}>
                         {highlightEvidence(item.desc)}
                       </Typography>
                     )}
@@ -2350,12 +2378,15 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
               </Typography>
               <Stack spacing={0.8}>
                 {gapItems.map((item, idx) => (
-                  <Box key={idx} sx={{ p: 1, bgcolor: "#1f1604", borderLeft: "3px solid #b45309", borderRadius: "0 6px 6px 0" }}>
-                    <Typography variant="subtitle2" sx={{ color: "#fde68a", fontSize: 12.5, fontWeight: 700 }}>
-                      {highlightEvidence(item.title)}
-                    </Typography>
+                  <Box key={idx} sx={{ p: 1.2, bgcolor: "#15130b", borderLeft: "3px solid #b45309", borderRadius: "0 6px 6px 0" }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                      <Typography variant="subtitle2" sx={{ color: "#fde68a", fontSize: 12.5, fontWeight: 700 }}>
+                        {highlightEvidence(item.title)}
+                      </Typography>
+                      <Chip size="small" label={item.severity} sx={{ height: 18, fontSize: 9, fontWeight: 800, bgcolor: "#2d1f05", color: "#f59e0b", border: "1px solid #92400e" }} />
+                    </Stack>
                     {item.desc && item.desc !== item.title && (
-                      <Typography variant="body2" sx={{ color: "#d97706", fontSize: 12, mt: 0.2 }}>
+                      <Typography variant="body2" sx={{ color: "#d97706", fontSize: 12, mt: 0.3 }}>
                         {highlightEvidence(item.desc)}
                       </Typography>
                     )}
@@ -2380,19 +2411,13 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
                   )}
 
                   {/* Metadata Chips */}
-                  {(interpretationData.status || interpretationData.confidence || interpretationData.priority) && (
-                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                      {interpretationData.status && (
-                        <Chip size="small" label={`Status: ${interpretationData.status}`} sx={{ bgcolor: "#1e293b", color: "#fde68a", border: "1px solid #d97706", fontWeight: 700, fontSize: 10.5 }} />
-                      )}
-                      {interpretationData.confidence && (
-                        <Chip size="small" label={`Confidence: ${interpretationData.confidence}`} sx={{ bgcolor: "#112a45", color: "#7dd3fc", border: "1px solid #0288d1", fontWeight: 700, fontSize: 10.5 }} />
-                      )}
-                      {interpretationData.priority && (
-                        <Chip size="small" label={`Priority: ${interpretationData.priority}`} sx={{ bgcolor: "#271704", color: "#f59e0b", border: "1px solid #b45309", fontWeight: 700, fontSize: 10.5 }} />
-                      )}
-                    </Stack>
-                  )}
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    <Chip size="small" label={`Status: ${interpretationData.status}`} sx={{ bgcolor: "#1e293b", color: "#fde68a", border: "1px solid #d97706", fontWeight: 700, fontSize: 10.5 }} />
+                    <Chip size="small" label={`Confidence: ${interpretationData.confidence}`} sx={{ bgcolor: "#112a45", color: "#7dd3fc", border: "1px solid #0288d1", fontWeight: 700, fontSize: 10.5 }} />
+                    {interpretationData.priority && (
+                      <Chip size="small" label={`Priority: ${interpretationData.priority}`} sx={{ bgcolor: "#271704", color: "#f59e0b", border: "1px solid #b45309", fontWeight: 700, fontSize: 10.5 }} />
+                    )}
+                  </Stack>
 
                   {/* Narrative */}
                   {interpretationData.narrative && (
