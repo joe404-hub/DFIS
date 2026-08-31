@@ -84,11 +84,19 @@ export default function App() {
   const [chatViewMode, setChatViewMode] = useState("console");
   const [llmStatus, setLlmStatus] = useState(null);
   const [llmModal, setLlmModal] = useState(false);
-  const [llmConfig, setLlmConfig] = useState({
-    model: "llama3.2:3b",
-    base_url: "http://localhost:11434",
-    temperature: 0.1,
+  const [llmConfig, setLlmConfig] = useState(() => {
+    try {
+      const saved = localStorage.getItem("dfis_llm_config");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {
+      model: "llama3.2:3b",
+      base_url: "http://localhost:11434",
+      temperature: 0.1,
+    };
   });
+  const [testingLlm, setTestingLlm] = useState(false);
+  const [llmTestMsg, setLlmTestMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const [ingestModal, setIngestModal] = useState(null);
@@ -154,12 +162,16 @@ export default function App() {
     }
   };
 
-  const loadLlmStatus = async () => {
+  const loadLlmStatus = async (customConfig) => {
+    const cfg = customConfig || llmConfig;
     try {
-      const res = await api("/api/llm/status").then((x) => x.json());
+      const res = await api(`/api/llm/status?base_url=${encodeURIComponent(cfg.base_url || "")}&model=${encodeURIComponent(cfg.model || "")}`).then((x) => x.json());
       setLlmStatus(res);
+      return res;
     } catch {
-      setLlmStatus({ connected: false, model: "llama3.2:3b", mode: "offline_grounded_fallback" });
+      const fallbackStatus = { connected: false, model: cfg.model || "llama3.2:3b", mode: "offline_grounded_fallback" };
+      setLlmStatus(fallbackStatus);
+      return fallbackStatus;
     }
   };
 
@@ -302,18 +314,19 @@ export default function App() {
         body: JSON.stringify({
           question: questionText,
           model: llmConfig.model,
+          base_url: llmConfig.base_url,
           temperature: llmConfig.temperature,
         }),
       }).then((x) => x.json());
       setAnswer(r.answer);
       setGenerator(r.generator || null);
       setAnswerMeta({
-        model: r.model || "llama3.2:3b",
+        model: r.model || llmConfig.model,
         provider: r.provider || "Ollama (Local LLM)",
         llm_mode: r.llm_mode,
         is_local: r.is_local,
         query_type: r.query_type,
-        intent: r.intent || (r.query_type === "general" ? "GENERAL" : r.query_type === "technical_forensic" ? "TECHNICAL_FORENSIC" : "FORENSIC_CASE_ANALYSIS"),
+        intent: r.intent || (r.query_type === "general" ? "GENERAL" : r.query_type === "technical_forensic" ? "FORENSIC_KNOWLEDGE" : r.query_type === "case_guidance" ? "CASE_GUIDANCE" : "CASE_QUERY"),
         forensic_state: r.forensic_state || null,
         generated_analysis: r.generated_analysis || null,
         concept_data: r.concept_data || null,
@@ -1525,31 +1538,108 @@ export default function App() {
         </DialogTitle>
         <DialogContent sx={{ bgcolor: "#060d14", color: "#cfd8dc", pt: 2 }}>
           <Typography variant="body2" sx={{ color: "#b0bec5", mb: 2 }}>
-            DFIS utilizes a 100% local, air-gapped Large Language Model (<b>llama3.2:3b</b>) to assist examiners with evidence analysis and grounded Q&A. No data is sent to external or cloud chatbot services.
+            DFIS utilizes a 100% local, air-gapped Large Language Model (<b>llama3.2:3b</b>) to assist examiners with evidence analysis and grounded Q&A.
           </Typography>
 
+          {/* Connection Test Alert */}
+          {llmTestMsg && (
+            <Alert
+              severity={llmTestMsg.type}
+              onClose={() => setLlmTestMsg(null)}
+              sx={{ mb: 2, bgcolor: llmTestMsg.type === "success" ? "#064e3b" : "#451a03", color: "#f8fafc" }}
+            >
+              {llmTestMsg.text}
+            </Alert>
+          )}
+
+          {/* Configuration Inputs */}
+          <Paper sx={{ p: 2, bgcolor: "#081420", border: "1px solid #142a3e", borderRadius: 1.5, mb: 2 }}>
+            <Typography variant="caption" sx={{ color: "#81d4fa", fontWeight: 700, textTransform: "uppercase", display: "block", mb: 1.5 }}>
+              Ollama Server Settings
+            </Typography>
+            <Stack spacing={1.5}>
+              <TextField
+                size="small"
+                fullWidth
+                label="OLLAMA BASE URL"
+                value={llmConfig.base_url}
+                onChange={(e) => setLlmConfig({ ...llmConfig, base_url: e.target.value })}
+                placeholder="http://localhost:11434"
+                helperText="Local Ollama endpoint (e.g. http://localhost:11434, http://127.0.0.1:11434, or host/tunnel URL)"
+                sx={{ bgcolor: "#060d14", borderRadius: 1 }}
+              />
+              <TextField
+                size="small"
+                fullWidth
+                label="MODEL NAME"
+                value={llmConfig.model}
+                onChange={(e) => setLlmConfig({ ...llmConfig, model: e.target.value })}
+                placeholder="llama3.2:3b"
+                helperText="Ollama model tag (e.g. llama3.2:3b, llama3:latest, qwen2.5:3b, mistral)"
+                sx={{ bgcolor: "#060d14", borderRadius: 1 }}
+              />
+              <Button
+                variant="contained"
+                color="secondary"
+                disabled={testingLlm}
+                onClick={async () => {
+                  setTestingLlm(true);
+                  setLlmTestMsg(null);
+                  try {
+                    const res = await api("/api/llm/config", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        base_url: llmConfig.base_url,
+                        model: llmConfig.model,
+                        temperature: llmConfig.temperature || 0.1,
+                      }),
+                    }).then((x) => x.json());
+                    setLlmStatus(res);
+                    localStorage.setItem("dfis_llm_config", JSON.stringify(llmConfig));
+                    if (res.connected) {
+                      setLlmTestMsg({
+                        type: "success",
+                        text: `Connected to Ollama! ${res.available_models?.length ? `Available models: ${res.available_models.join(", ")}` : "Ready for local inference."}`,
+                      });
+                    } else {
+                      setLlmTestMsg({
+                        type: "warning",
+                        text: `Ollama endpoint unreachable at ${llmConfig.base_url}. Deterministic fallback active. Ensure Ollama is running ('ollama run ${llmConfig.model}').`,
+                      });
+                    }
+                  } catch (err) {
+                    setLlmTestMsg({ type: "warning", text: `Connection check failed: ${err}` });
+                  } finally {
+                    setTestingLlm(false);
+                  }
+                }}
+                sx={{ textTransform: "none", fontWeight: 700 }}
+              >
+                {testingLlm ? "Testing Connection..." : "Test & Save Connection"}
+              </Button>
+            </Stack>
+          </Paper>
+
+          {/* Status Display */}
           <Paper sx={{ p: 2, bgcolor: "#081420", border: "1px solid #142a3e", borderRadius: 1.5, mb: 2 }}>
             <Typography variant="caption" sx={{ color: "#81d4fa", fontWeight: 700, textTransform: "uppercase", display: "block", mb: 1 }}>
-              Inference Engine Status
+              Active Inference Status
             </Typography>
             <Stack spacing={1}>
               <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography variant="body2" sx={{ color: "#90a4ae" }}>Active Model:</Typography>
+                <Typography variant="body2" sx={{ color: "#90a4ae" }}>Configured Model:</Typography>
                 <Chip size="small" label={llmConfig.model} sx={{ bgcolor: "#0f2e47", color: "#4fc3f7", fontWeight: 700 }} />
               </Stack>
               <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography variant="body2" sx={{ color: "#90a4ae" }}>Inference Provider:</Typography>
-                <Typography variant="body2" sx={{ color: "#e0f2f1", fontWeight: 600 }}>Ollama / Air-Gapped Reasoner</Typography>
-              </Stack>
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography variant="body2" sx={{ color: "#90a4ae" }}>Local Endpoint:</Typography>
+                <Typography variant="body2" sx={{ color: "#90a4ae" }}>Active Endpoint:</Typography>
                 <Typography variant="body2" sx={{ color: "#81d4fa", fontFamily: "IBM Plex Mono" }}>{llmConfig.base_url}</Typography>
               </Stack>
               <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography variant="body2" sx={{ color: "#90a4ae" }}>Inference Mode:</Typography>
+                <Typography variant="body2" sx={{ color: "#90a4ae" }}>Inference State:</Typography>
                 <Chip
                   size="small"
-                  label={llmStatus?.connected ? "Ollama Connected (Local)" : "Offline Grounded Reasoner"}
+                  label={llmStatus?.connected ? "Ollama Connected (Verified Local)" : "Offline Grounded Fallback Engine"}
                   color={llmStatus?.connected ? "success" : "warning"}
                   sx={{ height: 20, fontSize: 10, fontWeight: 700 }}
                 />
@@ -1558,13 +1648,19 @@ export default function App() {
           </Paper>
 
           <Paper sx={{ p: 2, bgcolor: "#081420", border: "1px solid #142a3e", borderRadius: 1.5, mb: 2 }}>
-            <Typography variant="caption" sx={{ color: "#81d4fa", fontWeight: 700, textTransform: "uppercase", display: "block", mb: 1 }}>
-              Quickstart: Running llama3.2:3b Locally
+            <Typography variant="caption" sx={{ color: "#81d4fa", fontWeight: 700, textTransform: "uppercase", display: "block", mb: 0.6 }}>
+              Quickstart: Serving Ollama Locally
             </Typography>
-            <Typography variant="caption" sx={{ color: "#b0bec5", display: "block", mb: 1 }}>
-              To enable live neural completions with Ollama on your forensic workstation:
+            <Typography variant="caption" sx={{ color: "#b0bec5", display: "block", mb: 0.8 }}>
+              To start Ollama on your local workstation and allow connections:
             </Typography>
-            <Paper sx={{ p: 1, bgcolor: "#03080d", border: "1px solid #0d2133", fontFamily: "IBM Plex Mono", fontSize: 12, color: "#4fc3f7" }}>
+            <Paper sx={{ p: 1, bgcolor: "#03080d", border: "1px solid #0d2133", fontFamily: "IBM Plex Mono", fontSize: 11.5, color: "#4fc3f7", mb: 0.8 }}>
+              OLLAMA_HOST=0.0.0.0 ollama serve
+            </Paper>
+            <Typography variant="caption" sx={{ color: "#90a4ae", display: "block" }}>
+              And pull your target model in a terminal:
+            </Typography>
+            <Paper sx={{ p: 1, bgcolor: "#03080d", border: "1px solid #0d2133", fontFamily: "IBM Plex Mono", fontSize: 11.5, color: "#4fc3f7" }}>
               ollama run llama3.2:3b
             </Paper>
           </Paper>

@@ -56,6 +56,7 @@ class CaseIn(BaseModel):
 class ChatIn(BaseModel):
     question: str
     model: str = "llama3.2:3b"
+    base_url: Optional[str] = None
     temperature: float = 0.1
 
 
@@ -607,30 +608,41 @@ def investigation(case_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/llm/status")
-def llm_status():
+def llm_status(base_url: Optional[str] = None, model: Optional[str] = None):
     """Return status and configuration for the local LLM (llama3.2:3b)."""
-    return check_local_llm_health()
+    import os
+    target_url = base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+    target_model = model or os.environ.get("DFIS_LLM_MODEL", "llama3.2:3b")
+    return check_local_llm_health(base_url=target_url, model=target_model)
 
 
 @app.post("/api/llm/config")
 def set_llm_config(body: LLMConfigIn):
     """Test and update configuration for the local LLM instance."""
+    import os
+    if body.base_url:
+        os.environ["OLLAMA_HOST"] = body.base_url
+    if body.model:
+        os.environ["DFIS_LLM_MODEL"] = body.model
     return check_local_llm_health(base_url=body.base_url, model=body.model)
 
 
 @app.post("/api/cases/{case_id}/chat")
 def chat(case_id: int, body: ChatIn, db: Session = Depends(get_db)):
+    import os
     c = _case_or_404(db, case_id)
     arts = db.query(Artifact).filter(Artifact.case_id == case_id).all()
     events = [_art_to_dict(a) for a in arts]
     rag = retrieve(case_id, body.question)
     analysis = analyze_timeline(events, case_id=case_id)
+    target_url = body.base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
     chat_res = generate_chat_response(
         question=body.question,
         events=events,
         inv=analysis,
         rag=rag,
         model=body.model or "llama3.2:3b",
+        base_url=target_url,
         temperature=body.temperature if body.temperature is not None else 0.1,
     )
     return {

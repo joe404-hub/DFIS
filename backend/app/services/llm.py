@@ -192,7 +192,15 @@ def check_local_llm_health(
     model: str = DEFAULT_MODEL,
 ) -> dict[str, Any]:
     """Check connectivity to local Ollama daemon and verify model availability."""
-    clean_url = base_url.rstrip("/")
+    candidates = [base_url.rstrip("/")]
+    if "localhost" in base_url:
+        candidates.append(base_url.replace("localhost", "127.0.0.1").rstrip("/"))
+        candidates.append(base_url.replace("localhost", "host.docker.internal").rstrip("/"))
+    elif "127.0.0.1" in base_url:
+        candidates.append(base_url.replace("127.0.0.1", "localhost").rstrip("/"))
+        candidates.append(base_url.replace("127.0.0.1", "host.docker.internal").rstrip("/"))
+
+    clean_url = candidates[0]
     result = {
         "provider": "Ollama (Local LLM)",
         "model": model,
@@ -204,22 +212,25 @@ def check_local_llm_health(
         "recommended_command": f"ollama run {model}",
     }
 
-    try:
-        with httpx.Client(timeout=2.0) as client:
-            resp = client.get(f"{clean_url}/api/tags")
-            if resp.status_code == 200:
-                data = resp.json()
-                models = [m.get("name") for m in data.get("models", []) if m.get("name")]
-                result["connected"] = True
-                result["available_models"] = models
-                if any(model in m for m in models):
-                    result["mode"] = "local_inference_ready"
-                else:
-                    result["mode"] = "ollama_connected_model_missing"
-                    result["recommended_command"] = f"ollama pull {model}"
-    except Exception as exc:
-        result["error"] = str(exc)
-        result["connected"] = False
+    for url in candidates:
+        try:
+            with httpx.Client(timeout=2.0) as client:
+                resp = client.get(f"{url}/api/tags")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    models = [m.get("name") for m in data.get("models", []) if m.get("name")]
+                    result["connected"] = True
+                    result["base_url"] = url
+                    result["available_models"] = models
+                    if any(model in m for m in models):
+                        result["mode"] = "local_inference_ready"
+                    else:
+                        result["mode"] = "ollama_connected_model_missing"
+                        result["recommended_command"] = f"ollama pull {model}"
+                    return result
+        except Exception as exc:
+            result["error"] = str(exc)
+            result["connected"] = False
 
     return result
 
@@ -232,7 +243,14 @@ def query_ollama(
     timeout: float = DEFAULT_TIMEOUT,
 ) -> Optional[str]:
     """Send chat request to local Ollama instance."""
-    clean_url = base_url.rstrip("/")
+    candidates = [base_url.rstrip("/")]
+    if "localhost" in base_url:
+        candidates.append(base_url.replace("localhost", "127.0.0.1").rstrip("/"))
+        candidates.append(base_url.replace("localhost", "host.docker.internal").rstrip("/"))
+    elif "127.0.0.1" in base_url:
+        candidates.append(base_url.replace("127.0.0.1", "localhost").rstrip("/"))
+        candidates.append(base_url.replace("127.0.0.1", "host.docker.internal").rstrip("/"))
+
     payload = {
         "model": model,
         "messages": messages,
@@ -242,17 +260,18 @@ def query_ollama(
         },
     }
 
-    try:
-        with httpx.Client(timeout=timeout) as client:
-            resp = client.post(f"{clean_url}/api/chat", json=payload)
-            if resp.status_code == 200:
-                data = resp.json()
-                msg = data.get("message", {})
-                content = msg.get("content", "").strip()
-                if content:
-                    return content
-    except Exception as exc:
-        logger.debug("Local Ollama endpoint unreachable or failed: %s", exc)
+    for url in candidates:
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                resp = client.post(f"{url}/api/chat", json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    msg = data.get("message", {})
+                    content = msg.get("content", "").strip()
+                    if content:
+                        return content
+        except Exception as exc:
+            logger.debug("Local Ollama endpoint %s unreachable or failed: %s", url, exc)
 
     return None
 
