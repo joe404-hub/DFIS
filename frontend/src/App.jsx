@@ -1620,21 +1620,21 @@ function EvidenceStatusBadge({ status }) {
     bg = "#082f49";
     border = "#0288d1";
     icon = <SecurityIcon sx={{ fontSize: 13, mr: 0.4 }} />;
+  } else if (s.includes("NOT ESTABLISHED")) {
+    color = "#cbd5e1";
+    bg = "#1e293b";
+    border = "#475569";
+    icon = <span style={{ fontSize: "12px", marginRight: "4px", lineHeight: 1 }}>○</span>;
   } else if (s.includes("OBSERVED") || (s.includes("ESTABLISHED") && !s.includes("NOT"))) {
     color = "#34d399";
     bg = "#022c22";
     border = "#059669";
     icon = <CheckCircleOutlineIcon sx={{ fontSize: 13, mr: 0.4 }} />;
-  } else if (s.includes("NOT ESTABLISHED")) {
-    color = "#cbd5e1";
-    bg = "#1e293b";
-    border = "#475569";
-    icon = <HelpOutlineIcon sx={{ fontSize: 13, mr: 0.4 }} />;
   } else if (s.includes("HYPOTHESIS") || s.includes("HYPOTHESIZED") || s.includes("INSUFFICIENT")) {
     color = "#fbbf24";
     bg = "#382404";
     border = "#d97706";
-    icon = <WarningAmberIcon sx={{ fontSize: 13, mr: 0.4 }} />;
+    icon = <span style={{ fontSize: "12px", marginRight: "4px", lineHeight: 1 }}>◐</span>;
   }
 
   return (
@@ -1779,55 +1779,256 @@ function GenerationProvenanceCard({ generator }) {
   );
 }
 
-function CollapsibleSection({ title, count, badgeColor = "default", defaultOpen = true, icon, children }) {
-  const [open, setOpen] = useState(defaultOpen);
+function parseForensicAnswer(rawText) {
+  if (!rawText) return { isConcept: false, assessmentText: "", assessmentState: null, observedItems: [], notEstablishedItems: [], hypothesisItems: [], gapItems: [], interpretationData: null, contextItems: [], rulesItems: [], disclaimer: "" };
 
-  return (
-    <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
-      <Button
-        fullWidth
-        onClick={() => setOpen(!open)}
-        sx={{
-          justifyContent: "space-between",
-          alignItems: "center",
-          px: 1,
-          py: 0.8,
-          borderRadius: 1,
-          color: "#cbd5e1",
-          bgcolor: open ? "rgba(2, 136, 209, 0.06)" : "transparent",
-          "&:hover": { bgcolor: "rgba(2, 136, 209, 0.12)" },
-          textTransform: "none",
-        }}
-      >
-        <Stack direction="row" spacing={1} alignItems="center">
-          {icon}
-          <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#e2e8f0", fontSize: 11.5, textTransform: "uppercase" }}>
-            {title}
-          </Typography>
-        </Stack>
-        <Stack direction="row" spacing={1} alignItems="center">
-          {count !== undefined && (
-            <Chip
-              size="small"
-              label={count}
-              sx={{
-                height: 18,
-                fontSize: 10,
-                fontWeight: 800,
-                bgcolor: badgeColor === "success" ? "#064e3b" : badgeColor === "warning" ? "#451a03" : "#0f2c44",
-                color: badgeColor === "success" ? "#6ee7b7" : badgeColor === "warning" ? "#fcd34d" : "#7dd3fc",
-              }}
-            />
-          )}
-          <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 700, fontSize: 12 }}>
-            {open ? "⌄" : "›"}
-          </Typography>
-        </Stack>
-      </Button>
+  // Convert escaped markdown into normal clean markdown
+  let clean = rawText
+    .replace(/\\*\*/g, "**")
+    .replace(/\\\*/g, "*")
+    .replace(/\\_/g, "_")
+    .replace(/\\#/g, "#")
+    .replace(/\\\[/g, "[")
+    .replace(/\\\]/g, "]")
+    .replace(/^:\s*/, "")
+    .replace(/^#{1,6}\s*$/gm, "")
+    .replace(/^[*_-]\s*$/gm, "")
+    .replace(/^[-•*]\s*##\s*$/gm, "")
+    .replace(/^The\s*$/gm, "")
+    .replace(/---+\s*(OBJECTIVE RESPONSE|FINAL RESPONSE|EVIDENCE GROUNDING|CITATION|RETRIEVED FORENSIC KNOWLEDGE BASE[^\-]*)\s*---+/gi, "")
+    .replace(/\[RESPONSE GENERATION\]/gi, "")
+    .replace(/\[USER QUESTION ANSWER\]/gi, "")
+    .replace(/\[AUTHORITATIVE CASE STATE CITATION\]/gi, "")
+    .replace(/\[FORENSIC KNOWLEDGE BASE CITATION\]/gi, "")
+    .replace(/\[INVESTIGATION QUERY INTENT CITATION\]/gi, "")
+    .replace(/\[INVESTIGATION QUERY INTENT\]/gi, "")
+    .replace(/\[USER QUESTION\]/gi, "")
+    .replace(/\[FORENSIC GROUNDING RULES CITATION\]/gi, "")
+    .replace(/\[FORENSIC GROUNDING RULES\]/gi, "")
+    .replace(/\[MANDATORY FORENSIC GROUNDING RULES\]/gi, "");
 
-      {open && <Box sx={{ mt: 1, px: 0.5 }}>{children}</Box>}
-    </Box>
+  // Extract disclaimer if present
+  let disclaimer = "General forensic knowledge is interpretive only and cannot be used as case evidence. AI is an investigative assistant, not an evidence source.";
+  const discIndex = clean.indexOf("General forensic knowledge is interpretive only");
+  if (discIndex !== -1) {
+    clean = clean.slice(0, discIndex).trim();
+  }
+
+  // Detect if Technical Concept Definition
+  const isConcept = Boolean(
+    clean.includes("CASE-SPECIFIC CONTEXT:") ||
+    clean.includes("Case-Specific Context:") ||
+    clean.includes("## Case-Specific Context") ||
+    clean.toLowerCase().includes("stands for") ||
+    clean.toLowerCase().includes("unique identifier") ||
+    clean.toLowerCase().includes("is the secure version") ||
+    /^(question:\s*)?(what is|what does|explain|define)\b/i.test(clean)
   );
+
+  // Normalize all possible section header variants into unified tokens
+  clean = clean
+    .replace(/##\s*Concept Definition:?/gi, "\n\n__SEC_ASSESSMENT__\n")
+    .replace(/##\s*Forensic Assessment:?/gi, "\n\n__SEC_ASSESSMENT__\n")
+    .replace(/\[?FORENSIC ASSESSMENT\]?:?/gi, "\n\n__SEC_ASSESSMENT__\n")
+    .replace(/##\s*Observed Case Evidence:?/gi, "\n\n__SEC_EVIDENCE__\n")
+    .replace(/\[?OBSERVED EVIDENCE\]?:?/gi, "\n\n__SEC_EVIDENCE__\n")
+    .replace(/##\s*Evidentiary State Breakdown:?/gi, "\n\n__SEC_STATES__\n")
+    .replace(/\[?EVIDENTIARY STATE BREAKDOWN\]?:?/gi, "\n\n__SEC_STATES__\n")
+    .replace(/##\s*Evidence Gaps(?: & Missing Evidence)?:?/gi, "\n\n__SEC_GAPS__\n")
+    .replace(/\[?EVIDENCE GAPS(?:\s*&\s*UNVERIFIED ASPECTS)?\]?:?/gi, "\n\n__SEC_GAPS__\n")
+    .replace(/##\s*Investigative Interpretation:?/gi, "\n\n__SEC_INTERPRETATION__\n")
+    .replace(/\[?INVESTIGATIVE INTERPRETATION(?:\s*&\s*ATT&CK ANALYSIS)?\]?:?/gi, "\n\n__SEC_INTERPRETATION__\n")
+    .replace(/##\s*Case-Specific Context:?/gi, "\n\n__SEC_CONTEXT__\n")
+    .replace(/\[?CASE-SPECIFIC CONTEXT(?:\s*&\s*EVIDENCE OBSERVATIONS)?\]?:?/gi, "\n\n__SEC_CONTEXT__\n")
+    .replace(/##\s*(?:Successful Logon ≠ Unauthorized Access|AUTHENTICATION VS UNAUTHORIZED ACCESS):?/gi, "\n\n__SEC_RULE_AUTH__\n")
+    .replace(/##\s*(?:Network Activity ≠ Data Exfiltration|NETWORK ACTIVITY VS EXFILTRATION):?/gi, "\n\n__SEC_RULE_NET__\n")
+    .replace(/##\s*(?:USB Connection ≠ Data Exfiltration|USB CONNECTION VS DATA EXFILTRATION):?/gi, "\n\n__SEC_RULE_USB__\n")
+    .replace(/##\s*Important Forensic Note:?/gi, "\n\n__SEC_RULE_NOTE__\n")
+    .replace(/(?<=\))\s*-\s*/g, "\n- ")
+    .replace(/(?<=\.)\s*-\s*/g, "\n- ")
+    .replace(/(?<=\])\s*-\s*/g, "\n- ");
+
+  const sections = {};
+  const tokens = clean.split(/__SEC_([A-Z_]+)__\n/);
+  if (tokens.length === 1) {
+    sections["ASSESSMENT"] = tokens[0].trim();
+  } else {
+    if (tokens[0].trim()) {
+      sections["ASSESSMENT"] = tokens[0].trim();
+    }
+    for (let i = 1; i < tokens.length; i += 2) {
+      sections[tokens[i]] = (tokens[i + 1] || "").trim();
+    }
+  }
+
+  // 1. Assessment Text
+  let assessmentText = sections["ASSESSMENT"] || "";
+  assessmentText = assessmentText
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("Question:") && !l.startsWith("Working classification:") && !l.startsWith("Investigation Priority:") && !l.startsWith("##") && l !== "*" && l !== "**" && l !== "The")
+    .join("\n")
+    .replace(/^\*+\s*/, "")
+    .trim();
+
+  let assessmentState = null;
+  const upper = clean.toUpperCase();
+  if (isConcept) {
+    assessmentState = "CONCEPT DEFINITION";
+  } else if (upper.includes("NOT ESTABLISHED")) {
+    assessmentState = "NOT ESTABLISHED";
+  } else if (upper.includes("SUPPORTED HYPOTHESIS")) {
+    assessmentState = "SUPPORTED HYPOTHESIS";
+  } else if (upper.includes("INSUFFICIENT EVIDENCE")) {
+    assessmentState = "INSUFFICIENT EVIDENCE";
+  } else if (upper.includes("OBSERVED")) {
+    assessmentState = "OBSERVED";
+  }
+
+  // 2. Parse & Classify Evidence Lines into Observed vs Not Established vs Hypothesis
+  const rawEvLines = ((sections["EVIDENCE"] || "") + "\n" + (sections["STATES"] || ""))
+    .split("\n")
+    .map((l) => l.replace(/^[-•✓*]\s*/, "").replace(/^\*+\s*/, "").trim())
+    .filter((l) => l && l !== "##" && l !== "#" && l !== "*" && l !== "**" && l !== "The");
+
+  const observedItems = [];
+  const notEstablishedItems = [];
+  const hypothesisItems = [];
+
+  for (const line of rawEvLines) {
+    const low = line.toLowerCase();
+    const parts = line.split(":");
+    const title = parts[0] ? parts[0].trim() : line;
+    const desc = parts.slice(1).join(":").trim();
+
+    if (
+      low.includes("[none]") ||
+      low.includes("not established") ||
+      low.includes("no usb device") ||
+      low.includes("no file copy") ||
+      low.includes("no evidence establishing") ||
+      low.includes("unauthorized account use") ||
+      low.includes("unauthorized access")
+    ) {
+      notEstablishedItems.push({ title, desc: desc || "Not established by ingested evidence." });
+    } else if (
+      low.includes("possible") ||
+      low.includes("hypothesis") ||
+      low.includes("hypothesized") ||
+      low.includes("insufficient evidence")
+    ) {
+      hypothesisItems.push({ title, desc: desc || "Investigative hypothesis requiring correlation." });
+    } else {
+      observedItems.push({ title, desc: desc || line });
+    }
+  }
+
+  // 3. Parse Gaps items
+  const gapsRaw = sections["GAPS"] || "";
+  const gapItems = gapsRaw
+    .split("\n")
+    .map((l) => l.replace(/^[-•?*]\s*/, "").replace(/^\*+\s*/, "").trim())
+    .filter((l) => l && l !== "##" && l !== "#" && l !== "*" && l !== "**" && l !== "The")
+    .map((l) => {
+      const parts = l.split(":");
+      return {
+        title: parts.length > 1 ? parts[0].trim() : "Correlation Gap",
+        desc: parts.length > 1 ? parts.slice(1).join(":").trim() : l,
+      };
+    });
+
+  // 4. Interpretation
+  const interpRaw = sections["INTERPRETATION"] || "";
+  let interpretationData = null;
+  if (interpRaw) {
+    let narrative = interpRaw;
+    let attackMapping = "";
+    let steps = [];
+    let hypothesis = "";
+    let status = "";
+    let confidence = "";
+    let priority = "";
+    let evidence = "";
+
+    const stepIdx = narrative.search(/Examiner verification steps:?/i);
+    if (stepIdx !== -1) {
+      const stepsText = narrative.slice(stepIdx).replace(/^Examiner verification steps:?\s*/i, "");
+      narrative = narrative.slice(0, stepIdx).trim();
+      steps = stepsText.split(/(?=\d+\.\s+)/).map((s) => s.trim()).filter((s) => s && s !== "The");
+    }
+
+    const attackIdx = narrative.search(/ATT&CK mapping:?/i);
+    if (attackIdx !== -1) {
+      attackMapping = narrative.slice(attackIdx).replace(/^ATT&CK mapping:?\s*/i, "").trim();
+      narrative = narrative.slice(0, attackIdx).trim();
+    }
+
+    const interpLines = narrative.split("\n").map((l) => l.trim()).filter((l) => l && l !== "##" && l !== "The");
+    const narrativeLines = [];
+    for (const l of interpLines) {
+      const lU = l.toUpperCase();
+      if (lU.startsWith("HYPOTHESIS:") || lU.startsWith("POSSIBLE REMOVABLE-MEDIA")) {
+        hypothesis = l.replace(/^Hypothesis:\s*/i, "");
+      } else if (lU.startsWith("STATUS:")) {
+        status = l.replace(/^Status:\s*/i, "");
+      } else if (lU.startsWith("CONFIDENCE:")) {
+        confidence = l.replace(/^Confidence:\s*/i, "");
+      } else if (lU.startsWith("INVESTIGATION PRIORITY:") || lU.startsWith("PRIORITY:")) {
+        priority = l.replace(/^(Investigation )?Priority:\s*/i, "");
+      } else if (lU.startsWith("SUPPORTING EVIDENCE") || lU.startsWith("SUPPORTING EVIDENCE IDS:")) {
+        evidence = l.replace(/^Supporting [Ee]vidence( IDs)?:\s*/i, "");
+      } else {
+        narrativeLines.push(l.replace(/^(Assessment|Narrative|Conclusion):\s*/i, ""));
+      }
+    }
+
+    interpretationData = {
+      hypothesis: hypothesis || (attackMapping ? `ATT&CK Hypotheses: ${attackMapping}` : "Investigative Hypothesis & ATT&CK Analysis"),
+      status,
+      confidence,
+      priority,
+      evidence,
+      attackMapping,
+      narrative: narrativeLines.join("\n\n"),
+      steps,
+    };
+  }
+
+  // 5. Context items (for Concept definitions)
+  const contextRaw = sections["CONTEXT"] || "";
+  const contextItems = contextRaw
+    .split("\n")
+    .map((l) => l.replace(/^[-\u2022*]\s*/, "").replace(/^\*+\s*/, "").trim())
+    .filter((l) => l && l !== "*" && l !== "**" && l !== "##");
+
+  // 6. Forensic Interpretation Rules Callouts
+  const rulesItems = [];
+  if (sections["RULE_NET"]) {
+    rulesItems.push({ title: "Network Activity ≠ Data Exfiltration", desc: sections["RULE_NET"], icon: "net" });
+  }
+  if (sections["RULE_AUTH"]) {
+    rulesItems.push({ title: "Successful Logon ≠ Unauthorized Access", desc: sections["RULE_AUTH"], icon: "auth" });
+  }
+  if (sections["RULE_USB"]) {
+    rulesItems.push({ title: "USB Connection ≠ Data Exfiltration", desc: sections["RULE_USB"], icon: "usb" });
+  }
+  if (sections["RULE_NOTE"]) {
+    rulesItems.push({ title: "Important Forensic Note", desc: sections["RULE_NOTE"], icon: "note" });
+  }
+
+  return {
+    isConcept,
+    assessmentText,
+    assessmentState,
+    observedItems,
+    notEstablishedItems,
+    hypothesisItems,
+    gapItems,
+    interpretationData,
+    contextItems,
+    rulesItems,
+    disclaimer,
+  };
 }
 
 function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMode, setViewMode }) {
@@ -1839,7 +2040,8 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
     assessmentText,
     assessmentState,
     observedItems,
-    stateMatrixItems,
+    notEstablishedItems,
+    hypothesisItems,
     gapItems,
     interpretationData,
     contextItems,
@@ -1976,12 +2178,12 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.6 }}>
           {/* Concept Explanation Card */}
           <Paper sx={{ p: 2, bgcolor: "#091c2c", border: "1px solid #0288d1", borderRadius: 2 }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.2 }}>
-              <Typography variant="caption" sx={{ color: "#38bdf8", fontWeight: 800, textTransform: "uppercase", fontSize: 10.5, letterSpacing: "0.08em" }}>
-                TECHNICAL CONCEPT DEFINITION
-              </Typography>
+            <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 800, textTransform: "uppercase", fontSize: 10, letterSpacing: "0.08em", display: "block", mb: 0.6 }}>
+              TECHNICAL DEFINITION
+            </Typography>
+            <Box sx={{ mb: 1.2 }}>
               <EvidenceStatusBadge status="CONCEPT DEFINITION" />
-            </Stack>
+            </Box>
             <Typography variant="body1" sx={{ color: "#f8fafc", fontSize: 13.5, lineHeight: 1.65, fontWeight: 500, whiteSpace: "pre-wrap" }}>
               {highlightEvidence(assessmentText)}
             </Typography>
@@ -1989,22 +2191,28 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
 
           {/* Case-Specific Evidence Card */}
           {contextItems.length > 0 && (
-            <CollapsibleSection title="Case Evidence Context" count={contextItems.length} badgeColor="success" icon={<CheckCircleOutlineIcon sx={{ color: "#34d399", fontSize: 16 }} />}>
+            <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
+              <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#34d399", fontSize: 11.5, textTransform: "uppercase", display: "block", mb: 1 }}>
+                Case Evidence Context
+              </Typography>
               <Stack spacing={0.8}>
                 {contextItems.map((c, idx) => (
-                  <Box key={idx} sx={{ p: 1, bgcolor: "#031d17", border: "1px solid #064e3b", borderRadius: 1.2 }}>
+                  <Box key={idx} sx={{ p: 1, bgcolor: "#022419", borderLeft: "3px solid #10b981", borderRadius: "0 6px 6px 0" }}>
                     <Typography variant="body2" sx={{ color: "#e2e8f0", fontSize: 12.5, lineHeight: 1.5 }}>
                       {highlightEvidence(c)}
                     </Typography>
                   </Box>
                 ))}
               </Stack>
-            </CollapsibleSection>
+            </Box>
           )}
 
           {/* Forensic Interpretation Rules Callouts */}
           {rulesItems.length > 0 && (
-            <CollapsibleSection title="Forensic Interpretation Rules" count={rulesItems.length} badgeColor="warning" icon={<WarningAmberIcon sx={{ color: "#fbbf24", fontSize: 16 }} />}>
+            <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
+              <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#fbbf24", fontSize: 11.5, textTransform: "uppercase", display: "block", mb: 1 }}>
+                Forensic Interpretation Rules
+              </Typography>
               <Stack spacing={1}>
                 {rulesItems.map((rule, idx) => (
                   <Paper key={idx} sx={{ p: 1.4, bgcolor: "#181404", border: "1px solid #92400e", borderRadius: 1.5 }}>
@@ -2022,7 +2230,7 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
                   </Paper>
                 ))}
               </Stack>
-            </CollapsibleSection>
+            </Box>
           )}
 
           {/* Disclaimer Footer */}
@@ -2041,10 +2249,10 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
               p: 2,
               bgcolor:
                 assessmentState === "OBSERVED"
-                  ? "#03261a"
+                  ? "#02261a"
                   : assessmentState === "NOT ESTABLISHED"
-                  ? "#111b27"
-                  : "#2a1804",
+                  ? "#0f1722"
+                  : "#271704",
               border:
                 assessmentState === "OBSERVED"
                   ? "1px solid #059669"
@@ -2054,135 +2262,167 @@ function ForensicConsoleAnswer({ answer, generator, inv, onFocusEvidence, viewMo
               borderRadius: 2,
             }}
           >
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.2 }}>
-              <Typography variant="caption" sx={{ color: "#94a3b8", fontWeight: 800, textTransform: "uppercase", fontSize: 10.5, letterSpacing: "0.08em" }}>
-                FORENSIC VERDICT
-              </Typography>
-              {assessmentState && <EvidenceStatusBadge status={assessmentState} />}
-            </Stack>
+            <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 800, textTransform: "uppercase", fontSize: 10, letterSpacing: "0.08em", display: "block", mb: 0.6 }}>
+              FORENSIC ASSESSMENT
+            </Typography>
+            <Box sx={{ mb: 1.2 }}>
+              <EvidenceStatusBadge status={assessmentState} />
+            </Box>
             <Typography variant="body1" sx={{ color: "#f8fafc", fontSize: 13.5, lineHeight: 1.65, fontWeight: 500 }}>
               {highlightEvidence(assessmentText)}
             </Typography>
           </Paper>
 
-          {/* Observed Case Evidence (Collapsible) */}
+          {/* 1. OBSERVED EVIDENCE (Clean borderless rows with green left accent) */}
           {observedItems.length > 0 && (
-            <CollapsibleSection title="Observed Case Evidence" count={observedItems.length} badgeColor="success" icon={<CheckCircleOutlineIcon sx={{ color: "#34d399", fontSize: 16 }} />}>
+            <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
+              <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#34d399", fontSize: 11.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.8, mb: 1 }}>
+                <CheckCircleOutlineIcon sx={{ fontSize: 16 }} /> Observed Case Evidence ({observedItems.length})
+              </Typography>
               <Stack spacing={0.8}>
                 {observedItems.map((item, idx) => (
-                  <Box key={idx} sx={{ p: 1, bgcolor: "#031d17", border: "1px solid #064e3b", borderRadius: 1.2, display: "flex", alignItems: "flex-start", gap: 1 }}>
-                    <CheckCircleOutlineIcon sx={{ color: "#34d399", fontSize: 16, mt: 0.2 }} />
-                    <Typography variant="body2" sx={{ color: "#e2e8f0", fontSize: 12.5, lineHeight: 1.4, flex: 1 }}>
-                      {highlightEvidence(item)}
+                  <Box key={idx} sx={{ p: 1, bgcolor: "#022419", borderLeft: "3px solid #10b981", borderRadius: "0 6px 6px 0" }}>
+                    <Typography variant="subtitle2" sx={{ color: "#e2e8f0", fontSize: 12.5, fontWeight: 700 }}>
+                      {highlightEvidence(item.title)}
                     </Typography>
+                    {item.desc && item.desc !== item.title && (
+                      <Typography variant="body2" sx={{ color: "#94a3b8", fontSize: 12, mt: 0.2 }}>
+                        {highlightEvidence(item.desc)}
+                      </Typography>
+                    )}
                   </Box>
                 ))}
               </Stack>
-            </CollapsibleSection>
+            </Box>
           )}
 
-          {/* Evidence Gaps & Missing Evidence (Collapsible) */}
+          {/* 2. NOT ESTABLISHED FINDINGS (Muted slate styling with ○ icon) */}
+          {notEstablishedItems.length > 0 && (
+            <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
+              <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#94a3b8", fontSize: 11.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.8, mb: 1 }}>
+                <span style={{ fontSize: "14px", lineHeight: 1 }}>○</span> Not Established / Unproven Findings ({notEstablishedItems.length})
+              </Typography>
+              <Stack spacing={0.8}>
+                {notEstablishedItems.map((item, idx) => (
+                  <Box key={idx} sx={{ p: 1, bgcolor: "#0f1722", borderLeft: "3px solid #475569", borderRadius: "0 6px 6px 0" }}>
+                    <Typography variant="subtitle2" sx={{ color: "#cbd5e1", fontSize: 12.5, fontWeight: 700 }}>
+                      {highlightEvidence(item.title)}
+                    </Typography>
+                    {item.desc && (
+                      <Typography variant="body2" sx={{ color: "#64748b", fontSize: 12, mt: 0.2 }}>
+                        {highlightEvidence(item.desc)}
+                      </Typography>
+                    )}
+                  </Box>
+                ))}
+              </Stack>
+            </Box>
+          )}
+
+          {/* 3. INVESTIGATIVE HYPOTHESES (Amber styling with ◐ icon) */}
+          {hypothesisItems.length > 0 && (
+            <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
+              <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#fbbf24", fontSize: 11.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.8, mb: 1 }}>
+                <span style={{ fontSize: "14px", lineHeight: 1 }}>◐</span> Investigative Hypotheses ({hypothesisItems.length})
+              </Typography>
+              <Stack spacing={0.8}>
+                {hypothesisItems.map((item, idx) => (
+                  <Box key={idx} sx={{ p: 1, bgcolor: "#1f1604", borderLeft: "3px solid #d97706", borderRadius: "0 6px 6px 0" }}>
+                    <Typography variant="subtitle2" sx={{ color: "#fde68a", fontSize: 12.5, fontWeight: 700 }}>
+                      {highlightEvidence(item.title)}
+                    </Typography>
+                    {item.desc && (
+                      <Typography variant="body2" sx={{ color: "#fbbf24", fontSize: 12, mt: 0.2 }}>
+                        {highlightEvidence(item.desc)}
+                      </Typography>
+                    )}
+                  </Box>
+                ))}
+              </Stack>
+            </Box>
+          )}
+
+          {/* 4. EVIDENCE GAPS (Amber cards with ⚠ icon and severity tag) */}
           {gapItems.length > 0 && (
-            <CollapsibleSection title="Evidence Gaps & Missing Proofs" count={gapItems.length} badgeColor="warning" icon={<HelpOutlineIcon sx={{ color: "#fbbf24", fontSize: 16 }} />}>
+            <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
+              <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#fbbf24", fontSize: 11.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.8, mb: 1 }}>
+                <WarningAmberIcon sx={{ fontSize: 16 }} /> Evidence Gaps & Missing Proofs ({gapItems.length})
+              </Typography>
               <Stack spacing={0.8}>
                 {gapItems.map((item, idx) => (
-                  <Box key={idx} sx={{ p: 1, bgcolor: "#1f1604", border: "1px solid #78350f", borderRadius: 1.2, display: "flex", alignItems: "flex-start", gap: 1 }}>
-                    <HelpOutlineIcon sx={{ color: "#fbbf24", fontSize: 16, mt: 0.2 }} />
-                    <Typography variant="body2" sx={{ color: "#fde68a", fontSize: 12.5, lineHeight: 1.4, flex: 1 }}>
-                      {highlightEvidence(item)}
+                  <Box key={idx} sx={{ p: 1, bgcolor: "#1f1604", borderLeft: "3px solid #b45309", borderRadius: "0 6px 6px 0" }}>
+                    <Typography variant="subtitle2" sx={{ color: "#fde68a", fontSize: 12.5, fontWeight: 700 }}>
+                      {highlightEvidence(item.title)}
                     </Typography>
+                    {item.desc && item.desc !== item.title && (
+                      <Typography variant="body2" sx={{ color: "#d97706", fontSize: 12, mt: 0.2 }}>
+                        {highlightEvidence(item.desc)}
+                      </Typography>
+                    )}
                   </Box>
                 ))}
               </Stack>
-            </CollapsibleSection>
+            </Box>
           )}
 
-          {/* Evidentiary State Breakdown (Collapsible) */}
-          {stateMatrixItems.length > 0 && (
-            <CollapsibleSection title="Evidentiary States Breakdown" count={stateMatrixItems.length} defaultOpen={false} icon={<SecurityIcon sx={{ color: "#81d4fa", fontSize: 16 }} />}>
-              <Stack spacing={0.6}>
-                {stateMatrixItems.map((st, idx) => {
-                  const parts = st.split(":");
-                  const finding = parts[0] ? parts[0].trim() : st;
-                  const stateDesc = parts.slice(1).join(":").trim();
-                  return (
-                    <Paper
-                      key={idx}
-                      sx={{
-                        p: 0.8,
-                        px: 1.2,
-                        bgcolor: "#081f30",
-                        border: "1px solid #143752",
-                        borderRadius: 1,
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                      }}
-                    >
-                      <Typography variant="body2" sx={{ color: "#cfd8dc", fontSize: 12, fontWeight: 600 }}>
-                        {finding}
-                      </Typography>
-                      {stateDesc && <EvidenceStatusBadge status={stateDesc} />}
-                    </Paper>
-                  );
-                })}
-              </Stack>
-            </CollapsibleSection>
-          )}
-
-          {/* Investigative Interpretation & ATT&CK Analysis (Collapsible) */}
+          {/* 5. INVESTIGATIVE INTERPRETATION & ATT&CK ANALYSIS */}
           {interpretationData && (
-            <CollapsibleSection title="Investigative Interpretation" icon={<TerminalIcon sx={{ color: "#38bdf8", fontSize: 16 }} />}>
-              <Stack spacing={1.2}>
-                {interpretationData.hypothesis && (
-                  <Typography variant="subtitle2" sx={{ color: "#7dd3fc", fontWeight: 700, fontSize: 13 }}>
-                    {interpretationData.hypothesis}
-                  </Typography>
-                )}
-
-                {/* Metadata Chips */}
-                {(interpretationData.status || interpretationData.confidence || interpretationData.priority) && (
-                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                    {interpretationData.status && (
-                      <Chip size="small" label={`Status: ${interpretationData.status}`} sx={{ bgcolor: "#1e293b", color: "#fde68a", border: "1px solid #d97706", fontWeight: 700, fontSize: 10.5 }} />
-                    )}
-                    {interpretationData.confidence && (
-                      <Chip size="small" label={`Confidence: ${interpretationData.confidence}`} sx={{ bgcolor: "#112a45", color: "#7dd3fc", border: "1px solid #0288d1", fontWeight: 700, fontSize: 10.5 }} />
-                    )}
-                    {interpretationData.priority && (
-                      <Chip size="small" label={`Priority: ${interpretationData.priority}`} sx={{ bgcolor: "#271704", color: "#f59e0b", border: "1px solid #b45309", fontWeight: 700, fontSize: 10.5 }} />
-                    )}
-                  </Stack>
-                )}
-
-                {/* Narrative text */}
-                {interpretationData.narrative && (
-                  <Box sx={{ p: 1.2, bgcolor: "#07131e", border: "1px solid #0f2c44", borderRadius: 1.2 }}>
-                    <Typography variant="body2" sx={{ color: "#e2e8f0", fontSize: 12.5, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
-                      {highlightEvidence(interpretationData.narrative)}
+            <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
+              <Typography variant="caption" sx={{ color: "#38bdf8", fontWeight: 800, fontSize: 11.5, textTransform: "uppercase", display: "block", mb: 1 }}>
+                Investigative Interpretation & ATT&CK Analysis
+              </Typography>
+              <Paper sx={{ p: 1.8, bgcolor: "#051829", border: "1px solid #0369a1", borderRadius: 1.8 }}>
+                <Stack spacing={1}>
+                  {interpretationData.hypothesis && (
+                    <Typography variant="subtitle2" sx={{ color: "#7dd3fc", fontWeight: 700, fontSize: 13 }}>
+                      {highlightEvidence(interpretationData.hypothesis)}
                     </Typography>
-                  </Box>
-                )}
+                  )}
 
-                {/* Numbered Examiner Tasks */}
-                {interpretationData.steps && interpretationData.steps.length > 0 && (
-                  <Box sx={{ mt: 0.8 }}>
-                    <Typography variant="caption" sx={{ color: "#7dd3fc", fontWeight: 700, display: "block", mb: 0.5, textTransform: "uppercase" }}>
-                      Examiner Verification Checklist:
-                    </Typography>
-                    <Stack spacing={0.6}>
-                      {interpretationData.steps.map((step, idx) => (
-                        <Paper key={idx} sx={{ p: 0.8, px: 1.2, bgcolor: "#061320", border: "1px solid #143552", borderRadius: 1 }}>
-                          <Typography variant="body2" sx={{ color: "#cbd5e1", fontSize: 12, lineHeight: 1.4 }}>
-                            {highlightEvidence(step)}
-                          </Typography>
-                        </Paper>
-                      ))}
+                  {/* Metadata Chips */}
+                  {(interpretationData.status || interpretationData.confidence || interpretationData.priority) && (
+                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                      {interpretationData.status && (
+                        <Chip size="small" label={`Status: ${interpretationData.status}`} sx={{ bgcolor: "#1e293b", color: "#fde68a", border: "1px solid #d97706", fontWeight: 700, fontSize: 10.5 }} />
+                      )}
+                      {interpretationData.confidence && (
+                        <Chip size="small" label={`Confidence: ${interpretationData.confidence}`} sx={{ bgcolor: "#112a45", color: "#7dd3fc", border: "1px solid #0288d1", fontWeight: 700, fontSize: 10.5 }} />
+                      )}
+                      {interpretationData.priority && (
+                        <Chip size="small" label={`Priority: ${interpretationData.priority}`} sx={{ bgcolor: "#271704", color: "#f59e0b", border: "1px solid #b45309", fontWeight: 700, fontSize: 10.5 }} />
+                      )}
                     </Stack>
-                  </Box>
-                )}
-              </Stack>
-            </CollapsibleSection>
+                  )}
+
+                  {/* Narrative */}
+                  {interpretationData.narrative && (
+                    <Box sx={{ mt: 0.5, p: 1.2, bgcolor: "#07131e", border: "1px solid #0f2c44", borderRadius: 1.2 }}>
+                      <Typography variant="body2" sx={{ color: "#e2e8f0", fontSize: 12.5, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                        {highlightEvidence(interpretationData.narrative)}
+                      </Typography>
+                    </Box>
+                  )}
+
+                  {/* Numbered Examiner Tasks */}
+                  {interpretationData.steps && interpretationData.steps.length > 0 && (
+                    <Box sx={{ mt: 0.8 }}>
+                      <Typography variant="caption" sx={{ color: "#7dd3fc", fontWeight: 700, display: "block", mb: 0.5, textTransform: "uppercase" }}>
+                        Examiner Verification Checklist:
+                      </Typography>
+                      <Stack spacing={0.6}>
+                        {interpretationData.steps.map((step, idx) => (
+                          <Paper key={idx} sx={{ p: 0.8, px: 1.2, bgcolor: "#061320", border: "1px solid #143552", borderRadius: 1 }}>
+                            <Typography variant="body2" sx={{ color: "#cbd5e1", fontSize: 12, lineHeight: 1.4 }}>
+                              {highlightEvidence(step)}
+                            </Typography>
+                          </Paper>
+                        ))}
+                      </Stack>
+                    </Box>
+                  )}
+                </Stack>
+              </Paper>
+            </Box>
           )}
 
           {/* Sticky Conclusion Summary Banner at Bottom */}
