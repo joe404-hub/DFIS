@@ -684,6 +684,13 @@ def get_concept_definition(query: str) -> tuple[str, str]:
             "In digital forensics, SHA-256 verifies evidence integrity and proves that files have not been modified, "
             "altered, or corrupted since acquisition."
         )
+    if "memory" in q_low or "volatility" in q_low or "snapshot" in q_low:
+        return (
+            "What is a Memory Snapshot in Digital Forensics?",
+            "A memory snapshot (RAM dump / volatile memory acquisition) captures the complete in-memory state of a workstation at a specific observation time.\n\n"
+            "Forensically, it records active process trees, injected modules, decrypted credentials, active network sockets, and unwritten file buffers. "
+            "The memory acquisition timestamp represents observation time, not process execution start time."
+        )
     if "mft" in q_low:
         return (
             "What is the Master File Table ($MFT)?",

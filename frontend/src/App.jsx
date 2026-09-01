@@ -2751,47 +2751,57 @@ function ForensicConsoleAnswer({
             <Typography variant="overline" sx={{ color: "#64748b", fontWeight: 800, letterSpacing: "0.1em", fontSize: 10, display: "block", mb: 0.4 }}>
               FORENSIC KNOWLEDGE & METHODOLOGY
             </Typography>
-            <MarkdownView content={assessmentText || answer} onFocusEvidence={onFocusEvidence} />
+            <MarkdownView content={answer || assessmentText} onFocusEvidence={onFocusEvidence} />
           </Paper>
 
-          {contextItems.length > 0 && (
+          {Array.isArray(contextItems) && contextItems.length > 0 && (
             <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
               <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#34d399", fontSize: 11.5, textTransform: "uppercase", display: "block", mb: 1 }}>
                 Case Evidence Context
               </Typography>
               <Stack spacing={0.8}>
-                {contextItems.map((c, idx) => (
-                  <Box key={idx} sx={{ p: 1.2, bgcolor: "#06131d", borderLeft: "3px solid #10b981", borderRadius: "0 6px 6px 0" }}>
-                    <Typography variant="body2" sx={{ color: "#e2e8f0", fontSize: 12.5, lineHeight: 1.5 }}>
-                      {highlightEvidence(c)}
-                    </Typography>
-                  </Box>
-                ))}
+                {contextItems.map((c, idx) => {
+                  const cStr = typeof c === "string" ? c : (c?.text || c?.description || JSON.stringify(c));
+                  return (
+                    <Box key={idx} sx={{ p: 1.2, bgcolor: "#06131d", borderLeft: "3px solid #10b981", borderRadius: "0 6px 6px 0" }}>
+                      <Typography variant="body2" sx={{ color: "#e2e8f0", fontSize: 12.5, lineHeight: 1.5 }}>
+                        {highlightEvidence(cStr)}
+                      </Typography>
+                    </Box>
+                  );
+                })}
               </Stack>
             </Box>
           )}
 
-          {rulesItems.length > 0 && (
+          {Array.isArray(rulesItems) && rulesItems.length > 0 && (
             <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
               <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#fbbf24", fontSize: 11.5, textTransform: "uppercase", display: "block", mb: 1 }}>
                 Forensic Interpretation Rules
               </Typography>
               <Stack spacing={1}>
-                {rulesItems.map((rule, idx) => (
-                  <Paper key={idx} sx={{ p: 1.4, bgcolor: "#181404", border: "1px solid #92400e", borderRadius: 1.5 }}>
-                    <Stack direction="row" spacing={1} alignItems="flex-start">
-                      {ruleIcon(rule.icon)}
-                      <Box>
-                        <Typography variant="subtitle2" sx={{ color: "#fbbf24", fontWeight: 700, fontSize: 12, mb: 0.4 }}>
-                          {rule.title}
-                        </Typography>
-                        <Typography variant="body2" sx={{ color: "#fef3c7", fontSize: 12, lineHeight: 1.5 }}>
-                          {highlightEvidence(rule.desc)}
-                        </Typography>
-                      </Box>
-                    </Stack>
-                  </Paper>
-                ))}
+                {rulesItems.map((rule, idx) => {
+                  const rTitle = typeof rule === "string" ? rule : (rule?.title || "Forensic Rule");
+                  const rDesc = typeof rule === "string" ? "" : (rule?.desc || rule?.description || "");
+                  const rIcon = typeof rule === "string" ? "note" : (rule?.icon || "note");
+                  return (
+                    <Paper key={idx} sx={{ p: 1.4, bgcolor: "#181404", border: "1px solid #92400e", borderRadius: 1.5 }}>
+                      <Stack direction="row" spacing={1} alignItems="flex-start">
+                        {ruleIcon(rIcon)}
+                        <Box>
+                          <Typography variant="subtitle2" sx={{ color: "#fbbf24", fontWeight: 700, fontSize: 12, mb: 0.4 }}>
+                            {rTitle}
+                          </Typography>
+                          {rDesc && (
+                            <Typography variant="body2" sx={{ color: "#fef3c7", fontSize: 12, lineHeight: 1.5 }}>
+                              {highlightEvidence(rDesc)}
+                            </Typography>
+                          )}
+                        </Box>
+                      </Stack>
+                    </Paper>
+                  );
+                })}
               </Stack>
             </Box>
           )}
