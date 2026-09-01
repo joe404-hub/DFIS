@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { Component, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -1335,18 +1335,20 @@ export default function App() {
                 {answer && (
                   <Box sx={{ mt: 2 }}>
                     <GenerationProvenanceCard generator={generator} />
-                    <ForensicConsoleAnswer
-                      answer={answer}
-                      generator={generator}
-                      inv={inv}
-                      intent={answerMeta?.intent}
-                      forensicState={answerMeta?.forensic_state}
-                      generatedAnalysis={answerMeta?.generated_analysis}
-                      conceptData={answerMeta?.concept_data}
-                      onFocusEvidence={focusEvidence}
-                      viewMode={chatViewMode}
-                      setViewMode={setChatViewMode}
-                    />
+                    <ChatErrorBoundary fallbackText={answer}>
+                      <ForensicConsoleAnswer
+                        answer={answer}
+                        generator={generator}
+                        inv={inv}
+                        intent={answerMeta?.intent}
+                        forensicState={answerMeta?.forensic_state}
+                        generatedAnalysis={answerMeta?.generated_analysis}
+                        conceptData={answerMeta?.concept_data}
+                        onFocusEvidence={focusEvidence}
+                        viewMode={chatViewMode}
+                        setViewMode={setChatViewMode}
+                      />
+                    </ChatErrorBoundary>
                   </Box>
                 )}
               </Paper>
@@ -2362,8 +2364,46 @@ function parseForensicAnswer(rawText) {
   };
 }
 
+class ChatErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error("Chat rendering error:", error, errorInfo);
+  }
+  componentDidUpdate(prevProps) {
+    if (prevProps.fallbackText !== this.props.fallbackText && this.state.hasError) {
+      this.setState({ hasError: false, error: null });
+    }
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Paper sx={{ p: 2, bgcolor: "#180c0c", border: "1px solid #7f1d1d", borderRadius: 2, mt: 1 }}>
+          <Typography variant="subtitle2" sx={{ color: "#fca5a5", fontWeight: 700, mb: 1 }}>
+            Rendering Notice
+          </Typography>
+          <Typography variant="body2" sx={{ color: "#fecaca", fontSize: 12, mb: 1.5 }}>
+            The structured view encountered a display issue. The raw text response is preserved below:
+          </Typography>
+          <Typography component="pre" variant="body2" sx={{ p: 1.5, bgcolor: "#040b12", borderRadius: 1, color: "#e2e8f0", whiteSpace: "pre-wrap", fontFamily: "IBM Plex Mono", fontSize: 11.5 }}>
+            {String(this.props.fallbackText || "")}
+          </Typography>
+        </Paper>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function MarkdownView({ content, onFocusEvidence }) {
   if (!content) return null;
+  const safeContent = typeof content === "string" ? content : String(content || "");
+  if (!safeContent.trim()) return null;
 
   return (
     <Box
@@ -2412,7 +2452,7 @@ function MarkdownView({ content, onFocusEvidence }) {
       }}
     >
       <ReactMarkdown remarkPlugins={[remarkGfm]}>
-        {content}
+        {safeContent}
       </ReactMarkdown>
     </Box>
   );
