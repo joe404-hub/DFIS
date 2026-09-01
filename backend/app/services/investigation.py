@@ -52,14 +52,17 @@ INTENT_TECHNICAL_FORENSIC = "FORENSIC_KNOWLEDGE"
 INTENT_CASE_ANALYSIS = "CASE_QUERY"
 
 TIMELINE_KEYWORDS = [
-    "timeline", "sequence of events", "chronology", "events occurred", "events that occurred",
+    "timeline", "timelime", "timline", "time line", "timelines", "chronology", "chronological",
+    "sequence of events", "events occurred", "events occured", "events that occurred", "events that occured",
     "what happened first", "order of events", "event sequence", "time sequence",
-    "show timeline", "generate timeline", "generate the timeline"
+    "show timeline", "generate timeline", "generate the timeline", "build timeline", "create timeline",
+    "events that took place", "what took place"
 ]
 
 SUMMARY_KEYWORDS = [
-    "summarize the case", "case summary", "summarize case", "overview of case",
-    "briefing on the case", "case overview", "executive summary", "overview of the investigation"
+    "summarize the case", "case summary", "summarize case", "summarise the case", "summarise case",
+    "overview of case", "briefing on the case", "case overview", "executive summary",
+    "overview of the investigation", "briefing of the case"
 ]
 
 FORENSIC_TECHNICAL_CONCEPTS = [
@@ -109,15 +112,34 @@ def classify_query_intent(question: str) -> str:
 
     q_low = q_stripped.lower()
 
-    # 1. Timeline requests (e.g. "generate the timeline of events occured")
-    if any(k in q_low for k in TIMELINE_KEYWORDS):
+    # 1. Timeline requests (e.g. "generate the timeline of events occured", "generate the timelime of events occured")
+    if bool(re.search(r"\btime\s*l[inm]{1,2}e\b", q_low)) or any(k in q_low for k in TIMELINE_KEYWORDS):
         return INTENT_CASE_TIMELINE
 
     # 2. Case Summary requests (e.g. "summarize the case")
-    if any(k in q_low for k in SUMMARY_KEYWORDS):
+    if bool(re.search(r"\bsummar(y|ize|ise)\b", q_low)) or any(k in q_low for k in SUMMARY_KEYWORDS):
         return INTENT_CASE_SUMMARY
 
     # 3. Case Guidance Check (e.g. "what are the recommended next steps?")
+    if any(k in q_low for k in CASE_GUIDANCE_KEYWORDS):
+        return INTENT_CASE_GUIDANCE
+
+    # 4. Specific Case Queries
+    if any(k in q_low for k in CASE_QUERY_KEYWORDS):
+        return INTENT_CASE_QUERY
+
+    if any(k in q_low for k in ["was confidential data", "was any confidential", "was data copied to usb", "was usb copied", "who accessed"]):
+        return INTENT_CASE_QUERY
+
+    # 5. Forensic Methodology & Knowledge Check (e.g. "how could we find suspicious activity?")
+    if any(k in q_low for k in METHODOLOGY_KEYWORDS):
+        return INTENT_FORENSIC_KNOWLEDGE
+
+    if any(re.search(r"\b" + re.escape(c) + r"\b", q_low) for c in FORENSIC_TECHNICAL_CONCEPTS):
+        return INTENT_FORENSIC_KNOWLEDGE
+
+    # 6. Pure General Educational / Technical Questions (e.g. "What is HTTP?", "Explain cryptography", "What is AI?")
+    return INTENT_GENERAL
     if any(k in q_low for k in CASE_GUIDANCE_KEYWORDS):
         return INTENT_CASE_GUIDANCE
 
@@ -759,6 +781,32 @@ def get_forensic_methodology_response(query: str) -> str:
         "6. **Construct a Unified Timeline**\n"
         "   - Correlate all timestamps in UTC to reconstruct the chronological chain of events and verify evidence gaps."
     )
+
+
+def generate_case_timeline_data(events: list[dict]) -> list[dict[str, Any]]:
+    """Return structured, sorted chronological event objects for direct UI and API consumption."""
+    timed = [e for e in events if e.get("timestamp") and e.get("source_type") != "correlated"]
+    timed = sorted(timed, key=lambda x: str(x.get("timestamp") or ""))
+
+    timeline = []
+    for e in timed:
+        ts = str(e.get("timestamp") or "")[:19].replace("T", " ")
+        act = (e.get("event_type") or e.get("action") or "Event").replace("_", " ").title()
+        target = str(e.get("target") or e.get("object") or "")
+        proc = str(e.get("process") or "")
+        desc = str(e.get("description") or "")
+        ev_id = e.get("id")
+
+        timeline.append({
+            "timestamp": ts,
+            "event_type": act,
+            "process": proc if proc else None,
+            "target": target if target else None,
+            "description": desc,
+            "source_type": e.get("source_type", "evidence"),
+            "evidence_ids": [ev_id] if ev_id is not None else [],
+        })
+    return timeline
 
 
 def build_case_timeline_table(events: list[dict], inv: dict) -> str:

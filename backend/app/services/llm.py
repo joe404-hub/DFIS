@@ -684,19 +684,27 @@ def generate_chat_response(
 
     # 4. CASE TIMELINE INTENT (Deterministic Chronological Table + AI Investigation Sequence Summary)
     if intent == "CASE_TIMELINE":
-        from app.services.investigation import build_case_timeline_table
+        from app.services.investigation import build_case_timeline_table, generate_case_timeline_data
         table_text = build_case_timeline_table(events, inv)
+        timeline_data = generate_case_timeline_data(events)
 
         timed_events = [e for e in events if e.get("timestamp") and e.get("source_type") != "correlated"]
         timed_events = sorted(timed_events, key=lambda x: str(x.get("timestamp") or ""))
         ev_summary = "\n".join([
-            f"- {str(e.get('timestamp'))[:19]} | {e.get('event_type')} | Process: {e.get('process') or '—'} | Target: {e.get('target') or e.get('object') or '—'} | Evidence ID [{e.get('id')}]"
-            for e in timed_events[:16]
+            f"- {str(e.get('timestamp'))[:19]} | Activity: {e.get('event_type', '').replace('_', ' ').title()} | Process: {e.get('process') or 'N/A'} | Target: {e.get('target') or e.get('object') or 'N/A'} | Evidence ID: [{e.get('id')}]"
+            for e in timed_events[:20]
         ])
+
+        context_manifest = {
+            "query_type": "CASE_TIMELINE",
+            "active_case_category": inv.get("category", "Investigation"),
+            "event_count": len(timed_events),
+            "dfis_context_available": True,
+        }
 
         messages = [
             {"role": "system", "content": CASE_TIMELINE_SYSTEM_PROMPT},
-            {"role": "user", "content": f"User Request: {question}\n\nAUTHORITATIVE CASE CHRONOLOGY:\n{ev_summary}\n\nProvide the chronological timeline explanation and AI Investigation Sequence Summary for this case."},
+            {"role": "user", "content": f"User Request: {question}\n\nAUTHORITATIVE DFIS CASE EVENTS:\n{ev_summary}\n\nProvide the chronological timeline explanation and AI Investigation Summary for this case."},
         ]
 
         local_output = None
@@ -726,6 +734,8 @@ def generate_chat_response(
                 "forensic_state": None,
                 "generated_analysis": None,
                 "concept_data": None,
+                "timeline": timeline_data,
+                "context_manifest": context_manifest,
                 "prompt_messages": messages,
                 "generator": {
                     "type": "llm",
@@ -752,6 +762,8 @@ def generate_chat_response(
             "forensic_state": None,
             "generated_analysis": None,
             "concept_data": None,
+            "timeline": timeline_data,
+            "context_manifest": context_manifest,
             "prompt_messages": messages,
             "generator": {
                 "type": "fallback",

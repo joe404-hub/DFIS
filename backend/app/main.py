@@ -663,6 +663,8 @@ def chat(case_id: int, body: ChatIn, db: Session = Depends(get_db)):
         "forensic_state": chat_res.get("forensic_state"),
         "generated_analysis": chat_res.get("generated_analysis"),
         "concept_data": chat_res.get("concept_data"),
+        "timeline": chat_res.get("timeline"),
+        "context_manifest": chat_res.get("context_manifest"),
         "prompt_messages": chat_res.get("prompt_messages"),
         "rag": analysis.get("rag") or rag,
         "category": analysis.get("category"),

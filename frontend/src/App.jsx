@@ -372,7 +372,16 @@ export default function App() {
             llmConfig.temperature
           );
           if (browserRes.success && browserRes.content) {
-            finalAnswer = browserRes.content;
+            if (r.intent === "CASE_TIMELINE") {
+              const tablePart = r.answer ? r.answer.split("### AI Investigation Summary")[0].trim() : "";
+              finalAnswer = `${tablePart}\n\n### AI Investigation Summary & Sequence Analysis\n${browserRes.content}\n\n*General forensic knowledge is interpretive only and cannot be presented as case evidence.*\n*AI is an investigative assistant, not an evidence source.*`;
+            } else if (r.intent === "CASE_SUMMARY") {
+              const summaryPart = r.answer ? r.answer.split("### Executive AI Assessment")[0].trim() : "";
+              finalAnswer = `${summaryPart}\n\n### Executive AI Assessment\n${browserRes.content}\n\n*General forensic knowledge is interpretive only and cannot be presented as case evidence.*\n*AI is an investigative assistant, not an evidence source.*`;
+            } else {
+              finalAnswer = browserRes.content;
+            }
+
             finalGenerator = {
               type: "llm",
               provider: "ollama",
@@ -385,6 +394,7 @@ export default function App() {
               request_id: r.generator?.request_id || `chat-${Date.now().toString(16)}`,
               generated_at: new Date().toISOString(),
             };
+
             if (r.intent === "CASE_QUERY" && r.forensic_state) {
               const parsedInterp = parseForensicAnswer(browserRes.content);
               finalAnalysis = parsedInterp.interpretationData || r.generated_analysis;
