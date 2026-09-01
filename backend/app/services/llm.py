@@ -53,6 +53,20 @@ Do NOT use a rigid mandatory report template.
 Do NOT generate case assessments, observed evidence lists, evidence IDs, or case conclusions about the current case unless the user specifically asks about the loaded case.
 Maintain the forensic principle: General forensic knowledge provides investigative guidance and does not constitute evidence in a specific case."""
 
+CASE_TIMELINE_SYSTEM_PROMPT = """You are the reasoning and language generation layer of the DFIS (Digital Forensics Investigation System).
+The DFIS engine has already ingested, verified with SHA-256, and normalized the authoritative case evidence.
+
+When the user requests a timeline or chronological event analysis:
+1. The chronological timeline has already been prepared from case evidence.
+2. Do NOT ask the user to provide events or context; the events are already loaded.
+3. Provide an AI Investigation Summary explaining the chronological sequence of activity, key forensic transitions, and investigative caveats.
+4. Highlight key forensic phases (e.g. Initial Authentication -> Sensitive Resource Access -> Staging / Storage -> Network Activity).
+5. Cite exact Evidence IDs [Evidence #ID] for all events mentioned."""
+
+CASE_SUMMARY_SYSTEM_PROMPT = """You are the executive reporting and summarization component of the DFIS (Digital Forensics Investigation System).
+Provide a concise, professional executive summary of the case based on the provided evidence artifacts and authoritative classification.
+Highlight the primary working classification, priority score, key observed facts, and examiner verification next steps."""
+
 FORENSIC_SYSTEM_PROMPT = """You are DFIS (Digital Forensics Investigation System) Assistant powered by the local LLM llama3.2:3b.
 You assist forensic investigators in analyzing evidence. You are an investigative assistant, NOT an evidence source.
 
@@ -668,7 +682,169 @@ def generate_chat_response(
                 },
             }
 
-    # 4. CASE GUIDANCE INTENT (e.g. "What are the recommended next steps?", "How should we investigate this case?")
+    # 4. CASE TIMELINE INTENT (Deterministic Chronological Table + AI Investigation Sequence Summary)
+    if intent == "CASE_TIMELINE":
+        from app.services.investigation import build_case_timeline_table
+        table_text = build_case_timeline_table(events, inv)
+
+        timed_events = [e for e in events if e.get("timestamp") and e.get("source_type") != "correlated"]
+        timed_events = sorted(timed_events, key=lambda x: str(x.get("timestamp") or ""))
+        ev_summary = "\n".join([
+            f"- {str(e.get('timestamp'))[:19]} | {e.get('event_type')} | Process: {e.get('process') or '—'} | Target: {e.get('target') or e.get('object') or '—'} | Evidence ID [{e.get('id')}]"
+            for e in timed_events[:16]
+        ])
+
+        messages = [
+            {"role": "system", "content": CASE_TIMELINE_SYSTEM_PROMPT},
+            {"role": "user", "content": f"User Request: {question}\n\nAUTHORITATIVE CASE CHRONOLOGY:\n{ev_summary}\n\nProvide the chronological timeline explanation and AI Investigation Sequence Summary for this case."},
+        ]
+
+        local_output = None
+        ollama_error = None
+        try:
+            local_output = query_ollama(
+                messages=messages,
+                model=model,
+                base_url=base_url,
+                temperature=temperature,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            ollama_error = str(exc)
+
+        if local_output:
+            clean_output = normalize_llm_response(local_output)
+            full_ans = f"{table_text}\n\n### AI Investigation Summary & Sequence Analysis\n{clean_output}\n\n*General forensic knowledge is interpretive only and cannot be presented as case evidence.*\n*AI is an investigative assistant, not an evidence source.*"
+            return {
+                "answer": full_ans,
+                "intent": "CASE_TIMELINE",
+                "query_type": "case_timeline",
+                "model": model,
+                "provider": "ollama",
+                "llm_mode": "local_neural_inference",
+                "is_local": True,
+                "forensic_state": None,
+                "generated_analysis": None,
+                "concept_data": None,
+                "prompt_messages": messages,
+                "generator": {
+                    "type": "llm",
+                    "provider": "ollama",
+                    "model": model,
+                    "mode": "local_neural_inference",
+                    "fallback": False,
+                    "verified": True,
+                    "reason": None,
+                    "provenance_id": req_id,
+                    "request_id": req_id,
+                    "generated_at": gen_time,
+                },
+            }
+
+        return {
+            "answer": table_text,
+            "intent": "CASE_TIMELINE",
+            "query_type": "case_timeline",
+            "model": f"{model} (Offline Grounded Local Engine)",
+            "provider": "dfis_grounded_engine",
+            "llm_mode": "local_grounded_engine",
+            "is_local": True,
+            "forensic_state": None,
+            "generated_analysis": None,
+            "concept_data": None,
+            "prompt_messages": messages,
+            "generator": {
+                "type": "fallback",
+                "provider": "dfis_grounded_engine",
+                "model": None,
+                "mode": "deterministic_grounded_fallback",
+                "fallback": True,
+                "verified": False,
+                "reason": ollama_error or "ollama_unreachable",
+                "provenance_id": req_id,
+                "request_id": req_id,
+                "generated_at": gen_time,
+            },
+        }
+
+    # 5. CASE SUMMARY INTENT (Executive Case Briefing)
+    if intent == "CASE_SUMMARY":
+        from app.services.investigation import build_case_summary_text
+        summary_text = build_case_summary_text(events, inv)
+        messages = [
+            {"role": "system", "content": CASE_SUMMARY_SYSTEM_PROMPT},
+            {"role": "user", "content": f"User Request: {question}\n\nCASE DETAILS:\n{summary_text}"},
+        ]
+
+        local_output = None
+        ollama_error = None
+        try:
+            local_output = query_ollama(
+                messages=messages,
+                model=model,
+                base_url=base_url,
+                temperature=temperature,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            ollama_error = str(exc)
+
+        if local_output:
+            clean_output = normalize_llm_response(local_output)
+            full_ans = f"{summary_text}\n\n### Executive AI Assessment\n{clean_output}\n\n*General forensic knowledge is interpretive only and cannot be presented as case evidence.*\n*AI is an investigative assistant, not an evidence source.*"
+            return {
+                "answer": full_ans,
+                "intent": "CASE_SUMMARY",
+                "query_type": "case_summary",
+                "model": model,
+                "provider": "ollama",
+                "llm_mode": "local_neural_inference",
+                "is_local": True,
+                "forensic_state": None,
+                "generated_analysis": None,
+                "concept_data": None,
+                "prompt_messages": messages,
+                "generator": {
+                    "type": "llm",
+                    "provider": "ollama",
+                    "model": model,
+                    "mode": "local_neural_inference",
+                    "fallback": False,
+                    "verified": True,
+                    "reason": None,
+                    "provenance_id": req_id,
+                    "request_id": req_id,
+                    "generated_at": gen_time,
+                },
+            }
+
+        return {
+            "answer": summary_text,
+            "intent": "CASE_SUMMARY",
+            "query_type": "case_summary",
+            "model": f"{model} (Offline Grounded Local Engine)",
+            "provider": "dfis_grounded_engine",
+            "llm_mode": "local_grounded_engine",
+            "is_local": True,
+            "forensic_state": None,
+            "generated_analysis": None,
+            "concept_data": None,
+            "prompt_messages": messages,
+            "generator": {
+                "type": "fallback",
+                "provider": "dfis_grounded_engine",
+                "model": None,
+                "mode": "deterministic_grounded_fallback",
+                "fallback": True,
+                "verified": False,
+                "reason": ollama_error or "ollama_unreachable",
+                "provenance_id": req_id,
+                "request_id": req_id,
+                "generated_at": gen_time,
+            },
+        }
+
+    # 6. CASE GUIDANCE INTENT (e.g. "What are the recommended next steps?", "How should we investigate this case?")
     if intent == "CASE_GUIDANCE":
         from app.services.actions import format_actions, recommend_actions
         actions = inv.get("next_actions") or recommend_actions(events, inv.get("correlations") or [])

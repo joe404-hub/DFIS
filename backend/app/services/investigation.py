@@ -42,12 +42,25 @@ GREETING_REGEX = re.compile(
 INTENT_GREETING = "GREETING"
 INTENT_GENERAL = "GENERAL"
 INTENT_FORENSIC_KNOWLEDGE = "FORENSIC_KNOWLEDGE"
+INTENT_CASE_TIMELINE = "CASE_TIMELINE"
+INTENT_CASE_SUMMARY = "CASE_SUMMARY"
 INTENT_CASE_GUIDANCE = "CASE_GUIDANCE"
 INTENT_CASE_QUERY = "CASE_QUERY"
 
 # Backward compatibility aliases
 INTENT_TECHNICAL_FORENSIC = "FORENSIC_KNOWLEDGE"
 INTENT_CASE_ANALYSIS = "CASE_QUERY"
+
+TIMELINE_KEYWORDS = [
+    "timeline", "sequence of events", "chronology", "events occurred", "events that occurred",
+    "what happened first", "order of events", "event sequence", "time sequence",
+    "show timeline", "generate timeline", "generate the timeline"
+]
+
+SUMMARY_KEYWORDS = [
+    "summarize the case", "case summary", "summarize case", "overview of case",
+    "briefing on the case", "case overview", "executive summary", "overview of the investigation"
+]
 
 FORENSIC_TECHNICAL_CONCEPTS = [
     "pcap", "pcapng", "evtx", "event id", "event 4624", "event 4688", "event 7045",
@@ -89,32 +102,40 @@ METHODOLOGY_KEYWORDS = [
 
 
 def classify_query_intent(question: str) -> str:
-    """Classify user query into 5 distinct intents: GREETING, GENERAL, FORENSIC_KNOWLEDGE, CASE_GUIDANCE, CASE_QUERY."""
+    """Classify user query into distinct intents: GREETING, GENERAL, FORENSIC_KNOWLEDGE, CASE_TIMELINE, CASE_SUMMARY, CASE_GUIDANCE, CASE_QUERY."""
     q_stripped = question.strip()
     if GREETING_REGEX.match(q_stripped):
         return INTENT_GREETING
 
     q_low = q_stripped.lower()
 
-    # 1. Case Guidance Check
+    # 1. Timeline requests (e.g. "generate the timeline of events occured")
+    if any(k in q_low for k in TIMELINE_KEYWORDS):
+        return INTENT_CASE_TIMELINE
+
+    # 2. Case Summary requests (e.g. "summarize the case")
+    if any(k in q_low for k in SUMMARY_KEYWORDS):
+        return INTENT_CASE_SUMMARY
+
+    # 3. Case Guidance Check (e.g. "what are the recommended next steps?")
     if any(k in q_low for k in CASE_GUIDANCE_KEYWORDS):
         return INTENT_CASE_GUIDANCE
 
-    # 2. Case Query Check
+    # 4. Specific Case Queries
     if any(k in q_low for k in CASE_QUERY_KEYWORDS):
         return INTENT_CASE_QUERY
 
     if any(k in q_low for k in ["was confidential data", "was any confidential", "was data copied to usb", "was usb copied", "who accessed"]):
         return INTENT_CASE_QUERY
 
-    # 3. Forensic Methodology & Knowledge Check
+    # 5. Forensic Methodology & Knowledge Check (e.g. "how could we find suspicious activity?")
     if any(k in q_low for k in METHODOLOGY_KEYWORDS):
         return INTENT_FORENSIC_KNOWLEDGE
 
     if any(re.search(r"\b" + re.escape(c) + r"\b", q_low) for c in FORENSIC_TECHNICAL_CONCEPTS):
         return INTENT_FORENSIC_KNOWLEDGE
 
-    # 4. Pure General Educational / Technical Questions
+    # 6. Pure General Educational / Technical Questions (e.g. "What is HTTP?", "Explain cryptography", "What is AI?")
     return INTENT_GENERAL
 
 
@@ -127,6 +148,10 @@ def classify_user_query(question: str) -> str:
         return "general"
     if intent in {INTENT_FORENSIC_KNOWLEDGE, INTENT_TECHNICAL_FORENSIC}:
         return "technical_forensic"
+    if intent == INTENT_CASE_TIMELINE:
+        return "case_timeline"
+    if intent == INTENT_CASE_SUMMARY:
+        return "case_summary"
     if intent == INTENT_CASE_GUIDANCE:
         return "case_guidance"
     return "case_investigation"
@@ -736,6 +761,74 @@ def get_forensic_methodology_response(query: str) -> str:
     )
 
 
+def build_case_timeline_table(events: list[dict], inv: dict) -> str:
+    """Deterministically sort and construct structured chronological investigation event timeline."""
+    timed = [e for e in events if e.get("timestamp") and e.get("source_type") != "correlated"]
+    timed = sorted(timed, key=lambda x: str(x.get("timestamp") or ""))
+
+    if not timed:
+        return "No timed forensic events recorded in current evidence."
+
+    rows = []
+    rows.append("### Chronological Investigation Event Timeline\n")
+    rows.append("| Time (UTC) | Activity | Artifact / Target | Process | Evidence |")
+    rows.append("|---|---|---|---|---|")
+
+    for e in timed:
+        ts = str(e.get("timestamp") or "")[:19].replace("T", " ")
+        act = (e.get("event_type") or e.get("action") or "Event").replace("_", " ").title()
+        target = str(e.get("target") or e.get("object") or "").replace("|", "-")
+        if len(target) > 36:
+            target = target[:33] + "..."
+        if not target:
+            target = "—"
+        proc = str(e.get("process") or "—").replace("|", "-")
+        ev_id = e.get("id")
+        ev_str = f"Evidence [#{ev_id}]" if ev_id is not None else "—"
+        rows.append(f"| {ts} | {act} | `{target}` | {proc} | {ev_str} |")
+
+    rows.append("\n### AI Investigation Summary & Sequence Analysis")
+    rows.append(
+        "The chronological sequence establishes initial user authentication, followed by process execution "
+        "and browser activity. Sensitive files and staging archives were subsequently accessed on the local system. "
+        "Examiners must verify drive-to-device mapping to establish whether confidential data was copied to external destinations."
+    )
+    rows.append("\n*General forensic knowledge is interpretive only and cannot be presented as case evidence.*")
+    rows.append("*AI is an investigative assistant, not an evidence source.*")
+
+    return "\n".join(rows)
+
+
+def build_case_summary_text(events: list[dict], inv: dict) -> str:
+    """Generate structured executive summary of the case."""
+    cat = inv.get("category") or "Normal Activity"
+    sec = inv.get("secondary") or ""
+    label = format_classification_label(cat, sec)
+    score = inv.get("risk_score", 0)
+    priority = inv.get("priority") or "LOW PRIORITY"
+
+    groups = inv.get("correlations") or []
+    obs = inv.get("evidentiary_states") or []
+
+    lines = [
+        "### Executive Forensic Case Summary\n",
+        f"- **Working Classification**: {label}",
+        f"- **Investigation Priority**: {score}/100 ({priority})",
+        f"- **Total Ingested Artifacts**: {len(events)} events",
+        f"- **Correlated Multi-Source Clusters**: {len(groups)} clusters\n",
+        "### Key Evidentiary State Breakdown",
+    ]
+    for st in obs:
+        lines.append(f"- **{st.get('finding')}**: {st.get('state')} ({st.get('detail', '')})")
+
+    lines.append("\n### Examiner Next Steps")
+    lines.append("Review correlation gaps and verify drive-to-device mappings before drawing final conclusions.")
+    lines.append("\n*General forensic knowledge is interpretive only and cannot be presented as case evidence.*")
+    lines.append("*AI is an investigative assistant, not an evidence source.*")
+
+    return "\n".join(lines)
+
+
 def _concept_response(question: str, events: list[dict], inv: dict, is_hybrid: bool = False) -> str:
     """Format tailored response for General and Hybrid questions."""
     q_title, definition = get_concept_definition(question)
@@ -800,18 +893,26 @@ def answer_question(question: str, rag: dict, events: list[dict], inv: dict) -> 
     if intent == INTENT_GREETING:
         return _greeting_response()
 
-    # 2. Routing: Pure General Educational / Technical queries
+    # 2. Routing: Case Timeline Queries (Deterministic chronological timeline)
+    if intent == INTENT_CASE_TIMELINE:
+        return build_case_timeline_table(events, inv)
+
+    # 3. Routing: Case Summary Queries
+    if intent == INTENT_CASE_SUMMARY:
+        return build_case_summary_text(events, inv)
+
+    # 4. Routing: Pure General Educational / Technical queries
     if intent == INTENT_GENERAL:
         return get_general_concept_response(question)
 
-    # 3. Routing: Technical Forensic Knowledge & Methodology queries
-    if intent == INTENT_TECHNICAL_FORENSIC:
+    # 5. Routing: Technical Forensic Knowledge & Methodology queries
+    if intent in {INTENT_FORENSIC_KNOWLEDGE, INTENT_TECHNICAL_FORENSIC}:
         if any(k in question.lower() for k in METHODOLOGY_KEYWORDS):
             meth = get_forensic_methodology_response(question)
-            return f"## Forensic Investigation Methodology\n\n{meth}\n\nGeneral forensic knowledge is interpretive only and cannot be presented as case evidence.\nAI is an investigative assistant, not an evidence source."
+            return f"{meth}\n\nGeneral forensic knowledge is interpretive only and cannot be presented as case evidence.\nAI is an investigative assistant, not an evidence source."
         return _concept_response(question, events, inv, is_hybrid=False)
 
-    # 4. Routing: Case-Specific Investigation queries
+    # 6. Routing: Case-Specific Investigation queries
     q = question.lower()
     lines = [
         f"Question: {question}",

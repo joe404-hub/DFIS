@@ -16,6 +16,8 @@ from app.services.investigation import (
     INTENT_TECHNICAL_FORENSIC,
     INTENT_FORENSIC_KNOWLEDGE,
     INTENT_CASE_ANALYSIS,
+    INTENT_CASE_TIMELINE,
+    INTENT_CASE_SUMMARY,
     INTENT_CASE_GUIDANCE,
     INTENT_CASE_QUERY,
 )
@@ -44,11 +46,35 @@ def test_query_classifier():
     assert classify_query_intent("What is T1078?") == INTENT_TECHNICAL_FORENSIC
     assert classify_query_intent("how could we find the suspicious activity taken place?") == INTENT_TECHNICAL_FORENSIC
 
-    # 4. Case Investigation & Guidance queries
+    # 4. Case Investigation, Timeline, Summary & Guidance queries
+    assert classify_query_intent("generate the timeline of events occured") == INTENT_CASE_TIMELINE
+    assert classify_query_intent("show sequence of events") == INTENT_CASE_TIMELINE
+    assert classify_query_intent("summarize the case") == INTENT_CASE_SUMMARY
+    assert classify_query_intent("What are the recommended next steps?") == INTENT_CASE_GUIDANCE
     assert classify_query_intent("Was confidential data copied to USB?") == INTENT_CASE_QUERY
     assert classify_query_intent("Does the HTTPS activity in this case indicate exfiltration?") == INTENT_CASE_QUERY
     assert classify_query_intent("What was chrome.exe accessing in this case?") == INTENT_CASE_QUERY
-    assert classify_query_intent("What are the recommended next steps?") == INTENT_CASE_GUIDANCE
+
+
+def test_case_timeline_generation():
+    """Verify deterministic timeline table generation with chronological ordering and evidence IDs."""
+    t0 = datetime(2026, 8, 14, 9, 0, 0)
+    events = [
+        {"id": 1, "timestamp": t0, "event_type": "logon", "source_type": "windows_event", "target": "WORKSTATION-14", "process": "lsass.exe", "description": "Windows logon"},
+        {"id": 2, "timestamp": t0 + timedelta(minutes=5), "event_type": "url_visit", "source_type": "browser", "target": "https://github.com/acme/ProjectX", "process": "chrome.exe", "description": "Browser visit"},
+        {"id": 3, "timestamp": t0 + timedelta(minutes=10), "event_type": "usb_connect", "source_type": "windows_event", "target": "SanDisk Ultra", "description": "USB device connected"},
+    ]
+    inv = run_investigation(case_id=1, events=events)
+    ans = answer_question("generate the timeline of events occured", {}, events, inv)
+
+    assert "Chronological Investigation Event Timeline" in ans
+    assert "2026-08-14 09:00:00" in ans
+    assert "2026-08-14 09:05:00" in ans
+    assert "2026-08-14 09:10:00" in ans
+    assert "Evidence [#1]" in ans
+    assert "Evidence [#2]" in ans
+    assert "Evidence [#3]" in ans
+    assert "AI Investigation Summary" in ans
 
 
 def test_general_https_response():

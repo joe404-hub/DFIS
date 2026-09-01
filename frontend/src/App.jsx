@@ -2646,6 +2646,38 @@ function ForensicConsoleAnswer({
             </Typography>
           </Paper>
         </Box>
+      ) : isCaseTimeline ? (
+        /* Case Timeline Mode: Structured Table & AI Investigation Summary */
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.4 }}>
+          <Paper sx={{ p: 2, bgcolor: "#091c2c", border: "1px solid #0288d1", borderRadius: 2 }}>
+            <Typography variant="overline" sx={{ color: "#38bdf8", fontWeight: 800, letterSpacing: "0.08em", fontSize: 10.5, display: "block", mb: 0.4 }}>
+              INVESTIGATION EVENT TIMELINE & SEQUENCE ANALYSIS
+            </Typography>
+            <MarkdownView content={answer} onFocusEvidence={onFocusEvidence} />
+          </Paper>
+
+          <Paper sx={{ p: 1.2, bgcolor: "#040b12", border: "1px solid #0d2133", borderRadius: 1.2 }}>
+            <Typography variant="caption" sx={{ color: "#64748b", fontSize: 11, display: "block" }}>
+              <b>FORENSIC TIMELINE:</b> Chronological sequence constructed deterministically from verified SHA-256 evidence logs.
+            </Typography>
+          </Paper>
+        </Box>
+      ) : isCaseSummary ? (
+        /* Case Summary Mode: Executive Case Briefing */
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.4 }}>
+          <Paper sx={{ p: 2, bgcolor: "#091c2c", border: "1px solid #0288d1", borderRadius: 2 }}>
+            <Typography variant="overline" sx={{ color: "#38bdf8", fontWeight: 800, letterSpacing: "0.08em", fontSize: 10.5, display: "block", mb: 0.4 }}>
+              EXECUTIVE FORENSIC CASE SUMMARY
+            </Typography>
+            <MarkdownView content={answer} onFocusEvidence={onFocusEvidence} />
+          </Paper>
+
+          <Paper sx={{ p: 1.2, bgcolor: "#040b12", border: "1px solid #0d2133", borderRadius: 1.2 }}>
+            <Typography variant="caption" sx={{ color: "#64748b", fontSize: 11, display: "block" }}>
+              <b>CASE BRIEFING:</b> Executive briefing grounded in authoritative case classification.
+            </Typography>
+          </Paper>
+        </Box>
       ) : isCaseGuidance ? (
         /* Mode 4: Case Guidance & Recommendations */
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.4 }}>

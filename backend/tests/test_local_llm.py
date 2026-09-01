@@ -368,3 +368,20 @@ def test_generate_chat_response_technical_forensic_methodology(test_case_state, 
     # Does not dump the USB false verdict
     assert "The available evidence does not establish that any confidential file was copied to a USB device" not in res["answer"]
 
+
+def test_generate_chat_response_timeline(test_case_state, test_events):
+    """Verify timeline request generates chronological event table and does not ask user for events."""
+    res = generate_chat_response(
+        question="generate the timeline of events occured",
+        events=test_events,
+        inv=test_case_state,
+        rag={},
+    )
+    assert res["intent"] == "CASE_TIMELINE"
+    assert "Chronological Investigation Event Timeline" in res["answer"]
+    assert "2026-08-14 09:00:00" in res["answer"]
+    assert "Evidence [#1]" in res["answer"]
+    assert "AI Investigation Summary" in res["answer"]
+    # Never ask user to provide events
+    assert "Could you please provide more context" not in res["answer"]
+
