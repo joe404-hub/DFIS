@@ -1341,6 +1341,7 @@ export default function App() {
                         generator={generator}
                         inv={inv}
                         intent={answerMeta?.intent}
+                        renderType={answerMeta?.render_type}
                         forensicState={answerMeta?.forensic_state}
                         generatedAnalysis={answerMeta?.generated_analysis}
                         conceptData={answerMeta?.concept_data}
@@ -2458,64 +2459,36 @@ function MarkdownView({ content, onFocusEvidence }) {
   );
 }
 
-function ForensicConsoleAnswer({
-  answer,
-  generator,
-  inv,
-  intent,
+function ForensicStructuredPanel({
   forensicState,
   generatedAnalysis,
-  conceptData,
+  answer,
+  inv,
   onFocusEvidence,
-  viewMode,
-  setViewMode,
 }) {
-  if (!answer && !forensicState) return null;
-
   const parsed = parseForensicAnswer(answer);
-
-  const isGeneral = intent === "GENERAL";
-  const isCaseGuidance = intent === "CASE_GUIDANCE";
-  const isTechnicalForensic =
-    intent === "FORENSIC_KNOWLEDGE" ||
-    intent === "TECHNICAL_FORENSIC" ||
-    Boolean(
-      conceptData ||
-      forensicState?.assessment?.status === "CONCEPT DEFINITION" ||
-      forensicState?.conclusion?.status === "CONCEPT DEFINITION" ||
-      parsed.isConcept
-    );
 
   const assessmentText =
     forensicState?.assessment?.summary ||
-    conceptData?.definition ||
     parsed.assessmentText ||
     "The available evidence does not establish that any confidential file was copied to a USB device.";
 
   const assessmentState =
     forensicState?.assessment?.status?.replace(/_/g, " ") ||
     parsed.assessmentState ||
-    (isTechnicalForensic ? "CONCEPT DEFINITION" : "NOT ESTABLISHED");
+    "NOT ESTABLISHED";
 
   const observedItems =
-    forensicState?.observed_evidence && forensicState.observed_evidence.length > 0
-      ? forensicState.observed_evidence
-      : parsed.observedItems;
+    (forensicState?.observed_evidence?.length ? forensicState.observed_evidence : parsed.observedItems) || [];
 
   const notEstablishedItems =
-    forensicState?.unproven_findings && forensicState.unproven_findings.length > 0
-      ? forensicState.unproven_findings
-      : parsed.notEstablishedItems;
+    (forensicState?.unproven_findings?.length ? forensicState.unproven_findings : parsed.notEstablishedItems) || [];
 
   const hypothesisItems =
-    generatedAnalysis?.hypotheses && generatedAnalysis.hypotheses.length > 0
-      ? generatedAnalysis.hypotheses
-      : parsed.hypothesisItems;
+    (generatedAnalysis?.hypotheses?.length ? generatedAnalysis.hypotheses : parsed.hypothesisItems) || [];
 
   const gapItems =
-    forensicState?.evidence_gaps && forensicState.evidence_gaps.length > 0
-      ? forensicState.evidence_gaps
-      : parsed.gapItems;
+    (forensicState?.evidence_gaps?.length ? forensicState.evidence_gaps : parsed.gapItems) || [];
 
   const interpretationData = {
     attck_hypothesis:
@@ -2535,9 +2508,9 @@ function ForensicConsoleAnswer({
       parsed.interpretationData?.interpretation ||
       "The observed network activity and browser visits suggest that the user accessed confidential endpoints, but this does not imply that data was exfiltrated. Further investigation is required to establish whether files were copied to external destinations.",
     verification_steps:
-      generatedAnalysis?.verification_steps && generatedAnalysis.verification_steps.length > 0
+      (generatedAnalysis?.verification_steps?.length
         ? generatedAnalysis.verification_steps
-        : parsed.interpretationData?.verification_steps || [],
+        : parsed.interpretationData?.verification_steps) || [],
   };
 
   const conclusionData = {
@@ -2558,10 +2531,6 @@ function ForensicConsoleAnswer({
       parsed.conclusionData?.summary ||
       "The currently ingested evidence does not establish that confidential data was copied to a USB device.",
   };
-
-  const contextItems = conceptData?.context || parsed.contextItems || [];
-  const rulesItems = conceptData?.rules || parsed.rulesItems || [];
-  const disclaimer = parsed.disclaimer;
 
   const highlightEvidence = (text) => {
     if (!text) return null;
@@ -2616,14 +2585,439 @@ function ForensicConsoleAnswer({
     });
   };
 
-  const ruleIcon = (type) => {
-    switch (type) {
-      case "net": return <WarningAmberIcon sx={{ color: "#f59e0b", fontSize: 18 }} />;
-      case "auth": return <LockIcon sx={{ color: "#38bdf8", fontSize: 18 }} />;
-      case "usb": return <HelpOutlineIcon sx={{ color: "#ec4899", fontSize: 18 }} />;
-      default: return <SecurityIcon sx={{ color: "#81d4fa", fontSize: 18 }} />;
-    }
-  };
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.6 }}>
+      {/* Primary Assessment / Verdict Card */}
+      <Paper
+        sx={{
+          p: 2,
+          bgcolor:
+            assessmentState === "OBSERVED"
+              ? "#02261a"
+              : assessmentState === "NOT ESTABLISHED"
+              ? "#0f1722"
+              : "#271704",
+          border:
+            assessmentState === "OBSERVED"
+              ? "1px solid #059669"
+              : assessmentState === "NOT ESTABLISHED"
+              ? "1px solid #334155"
+              : "1px solid #d97706",
+          borderRadius: 2,
+        }}
+      >
+        <Typography variant="overline" sx={{ color: "#64748b", fontWeight: 800, letterSpacing: "0.1em", fontSize: 10.5 }}>
+          FORENSIC ASSESSMENT
+        </Typography>
+        <Box sx={{ my: 0.8 }}>
+          <EvidenceStatusBadge status={assessmentState} />
+        </Box>
+        <Typography variant="body1" sx={{ color: "#f8fafc", fontSize: 13.5, lineHeight: 1.65, fontWeight: 500 }}>
+          {highlightEvidence(assessmentText)}
+        </Typography>
+      </Paper>
+
+      {/* 1. OBSERVED CASE EVIDENCE */}
+      {observedItems.length > 0 && (
+        <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
+          <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#34d399", fontSize: 11.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.8, mb: 1 }}>
+            <CheckCircleOutlineIcon sx={{ fontSize: 16 }} /> Observed Case Evidence ({observedItems.length})
+          </Typography>
+          <Stack spacing={0.8}>
+            {observedItems.map((item, idx) => {
+              const itemTitle = typeof item.title === "string" ? item.title : String(item.title || "");
+              const itemDesc = typeof item.description === "string" ? item.description : (typeof item.desc === "string" ? item.desc : "");
+              const evIds = Array.isArray(item.evidence_ids) ? item.evidence_ids : [];
+              const eventIds = Array.isArray(item.event_ids) ? item.event_ids : [];
+              const artifactsList = Array.isArray(item.artifacts) ? item.artifacts : [];
+
+              return (
+                <Box key={idx} sx={{ p: 1.2, bgcolor: "#06131d", borderLeft: "3px solid #10b981", borderRadius: "0 6px 6px 0" }}>
+                  <Typography variant="subtitle2" sx={{ color: "#e2e8f0", fontSize: 12.5, fontWeight: 700 }}>
+                    {itemTitle}
+                  </Typography>
+                  {itemDesc && (
+                    <Typography variant="body2" sx={{ color: "#94a3b8", fontSize: 12, mt: 0.2 }}>
+                      {itemDesc}
+                    </Typography>
+                  )}
+
+                  {/* Metadata Chips */}
+                  <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.8 }}>
+                    {evIds.length > 0 && (
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        <Typography variant="caption" sx={{ fontSize: 10, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                          Evidence
+                        </Typography>
+                        {evIds.map((id) => (
+                          <Box
+                            component="button"
+                            key={`ev-${id}`}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onFocusEvidence) onFocusEvidence(id);
+                            }}
+                            title={`Click to focus Artifact #${id} in Timeline`}
+                            sx={{
+                              cursor: "pointer",
+                              border: "1px solid #0288d1",
+                              bgcolor: "#0b263e",
+                              color: "#38bdf8",
+                              fontFamily: "IBM Plex Mono",
+                              fontSize: 10.5,
+                              fontWeight: 700,
+                              px: 0.8,
+                              py: 0.15,
+                              borderRadius: 1,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              "&:hover": {
+                                bgcolor: "#0288d1",
+                                color: "#fff",
+                                transform: "translateY(-1px)",
+                              },
+                              transition: "all 0.15s ease",
+                            }}
+                          >
+                            #{id}
+                          </Box>
+                        ))}
+                      </Stack>
+                    )}
+
+                    {eventIds.length > 0 && (
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        <Typography variant="caption" sx={{ fontSize: 10, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                          Event
+                        </Typography>
+                        {eventIds.map((eid) => (
+                          <Chip
+                            key={`event-${eid}`}
+                            size="small"
+                            label={eid}
+                            sx={{
+                              height: 18,
+                              fontSize: 10,
+                              fontWeight: 700,
+                              fontFamily: "IBM Plex Mono",
+                              bgcolor: "#1e293b",
+                              color: "#cbd5e1",
+                              border: "1px solid #475569",
+                              borderRadius: 1,
+                            }}
+                          />
+                        ))}
+                      </Stack>
+                    )}
+
+                    {artifactsList.length > 0 && (
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        <Typography variant="caption" sx={{ fontSize: 10, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                          Artifact
+                        </Typography>
+                        {artifactsList.map((art) => (
+                          <Chip
+                            key={`art-${art}`}
+                            size="small"
+                            label={art}
+                            sx={{
+                              height: 18,
+                              fontSize: 10,
+                              fontWeight: 700,
+                              fontFamily: "IBM Plex Mono",
+                              bgcolor: "#142534",
+                              color: "#38bdf8",
+                              border: "1px solid #0369a1",
+                              borderRadius: 1,
+                            }}
+                          />
+                        ))}
+                      </Stack>
+                    )}
+                  </Stack>
+                </Box>
+              );
+            })}
+          </Stack>
+        </Box>
+      )}
+
+      {/* 2. NOT ESTABLISHED FINDINGS */}
+      {notEstablishedItems.length > 0 && (
+        <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
+          <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#94a3b8", fontSize: 11.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.8, mb: 1 }}>
+            <span style={{ fontSize: "14px", lineHeight: 1 }}>○</span> Not Established / Unproven Findings ({notEstablishedItems.length})
+          </Typography>
+          <Stack spacing={0.8}>
+            {notEstablishedItems.map((item, idx) => {
+              const itemTitle = typeof item.title === "string" ? item.title : String(item.title || "");
+              const itemDesc = typeof item.description === "string" ? item.description : (typeof item.desc === "string" ? item.desc : "");
+              const itemStatus = typeof item.status === "string" ? item.status.replace(/_/g, " ") : "NOT ESTABLISHED";
+
+              return (
+                <Box key={idx} sx={{ p: 1.2, bgcolor: "#0b131e", borderLeft: "3px solid #475569", borderRadius: "0 6px 6px 0" }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                    <Typography variant="subtitle2" sx={{ color: "#cbd5e1", fontSize: 12.5, fontWeight: 700 }}>
+                      {itemTitle}
+                    </Typography>
+                    <Chip
+                      size="small"
+                      label={itemStatus}
+                      sx={{ height: 18, fontSize: 9, fontWeight: 800, bgcolor: "#1e293b", color: "#94a3b8", border: "1px solid #334155" }}
+                    />
+                  </Stack>
+                  {itemDesc && (
+                    <Typography variant="body2" sx={{ color: "#64748b", fontSize: 12, mt: 0.3 }}>
+                      {itemDesc}
+                    </Typography>
+                  )}
+                </Box>
+              );
+            })}
+          </Stack>
+        </Box>
+      )}
+
+      {/* 3. INVESTIGATIVE HYPOTHESES */}
+      {hypothesisItems.length > 0 && (
+        <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
+          <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#fbbf24", fontSize: 11.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.8, mb: 1 }}>
+            <span style={{ fontSize: "14px", lineHeight: 1 }}>◐</span> Investigative Hypotheses ({hypothesisItems.length})
+          </Typography>
+          <Stack spacing={0.8}>
+            {hypothesisItems.map((item, idx) => {
+              const itemTitle = typeof item.title === "string" ? item.title : String(item.title || "");
+              const itemDesc = typeof item.description === "string" ? item.description : (typeof item.desc === "string" ? item.desc : "");
+              const itemStatus = typeof item.status === "string" ? item.status : "HYPOTHESIS · CORRELATION REQUIRED";
+              const evIds = Array.isArray(item.evidence_ids) ? item.evidence_ids : [];
+
+              return (
+                <Box key={idx} sx={{ p: 1.2, bgcolor: "#131c18", borderLeft: "3px solid #d97706", borderRadius: "0 6px 6px 0" }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                    <Typography variant="subtitle2" sx={{ color: "#fde68a", fontSize: 12.5, fontWeight: 700 }}>
+                      {itemTitle}
+                    </Typography>
+                    <Chip
+                      size="small"
+                      label={itemStatus}
+                      sx={{ height: 18, fontSize: 9, fontWeight: 800, bgcolor: "#382404", color: "#fbbf24", border: "1px solid #d97706" }}
+                    />
+                  </Stack>
+                  {itemDesc && (
+                    <Typography variant="body2" sx={{ color: "#d97706", fontSize: 12, mt: 0.3 }}>
+                      {itemDesc}
+                    </Typography>
+                  )}
+                  {evIds.length > 0 && (
+                    <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.6 }}>
+                      <Typography variant="caption" sx={{ fontSize: 10, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
+                        Evidence
+                      </Typography>
+                      {evIds.map((id) => (
+                        <Box
+                          component="button"
+                          key={`hypo-ev-${id}`}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (onFocusEvidence) onFocusEvidence(id);
+                          }}
+                          title={`Click to focus Artifact #${id} in Timeline`}
+                          sx={{
+                            cursor: "pointer",
+                            border: "1px solid #0288d1",
+                            bgcolor: "#0b263e",
+                            color: "#38bdf8",
+                            fontFamily: "IBM Plex Mono",
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                            px: 0.8,
+                            py: 0.15,
+                            borderRadius: 1,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            "&:hover": {
+                              bgcolor: "#0288d1",
+                              color: "#fff",
+                            },
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          #{id}
+                        </Box>
+                      ))}
+                    </Stack>
+                  )}
+                </Box>
+              );
+            })}
+          </Stack>
+        </Box>
+      )}
+
+      {/* 4. EVIDENCE GAPS */}
+      {gapItems.length > 0 && (
+        <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
+          <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#fbbf24", fontSize: 11.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.8, mb: 1 }}>
+            <WarningAmberIcon sx={{ fontSize: 16 }} /> Evidence Gaps & Missing Proofs ({gapItems.length})
+          </Typography>
+          <Stack spacing={0.8}>
+            {gapItems.map((item, idx) => {
+              const itemTitle = typeof item.title === "string" ? item.title : String(item.title || "");
+              const itemDesc = typeof item.description === "string" ? item.description : (typeof item.desc === "string" ? item.desc : "");
+              const itemSeverity = typeof item.severity === "string" ? item.severity : "Correlation Required";
+
+              return (
+                <Box key={idx} sx={{ p: 1.2, bgcolor: "#15130b", borderLeft: "3px solid #b45309", borderRadius: "0 6px 6px 0" }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                    <Typography variant="subtitle2" sx={{ color: "#fde68a", fontSize: 12.5, fontWeight: 700 }}>
+                      {itemTitle}
+                    </Typography>
+                    <Chip
+                      size="small"
+                      label={itemSeverity}
+                      sx={{ height: 18, fontSize: 9, fontWeight: 800, bgcolor: "#2d1f05", color: "#f59e0b", border: "1px solid #92400e" }}
+                    />
+                  </Stack>
+                  {itemDesc && itemDesc !== itemTitle && (
+                    <Typography variant="body2" sx={{ color: "#d97706", fontSize: 12, mt: 0.3 }}>
+                      {itemDesc}
+                    </Typography>
+                  )}
+                </Box>
+              );
+            })}
+          </Stack>
+        </Box>
+      )}
+
+      {/* 5. INVESTIGATIVE INTERPRETATION & ATT&CK ANALYSIS */}
+      {interpretationData && (
+        <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
+          <Typography variant="caption" sx={{ color: "#38bdf8", fontWeight: 800, fontSize: 11.5, textTransform: "uppercase", display: "block", mb: 1 }}>
+            Investigative Interpretation & ATT&CK Analysis
+          </Typography>
+          <Paper sx={{ p: 1.8, bgcolor: "#051829", border: "1px solid #0369a1", borderRadius: 1.8 }}>
+            <Stack spacing={1}>
+              {/* ATT&CK Hypothesis Card */}
+              <Box sx={{ p: 1, bgcolor: "#071c30", border: "1px solid #0c4a6e", borderRadius: 1.2 }}>
+                <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 800, textTransform: "uppercase", fontSize: 9.5, display: "block" }}>
+                  ATT&CK HYPOTHESIS
+                </Typography>
+                <Typography variant="subtitle2" sx={{ color: "#38bdf8", fontWeight: 700, fontSize: 13, my: 0.4 }}>
+                  {interpretationData.attck_hypothesis || "T1567 · Exfiltration Over Web Service"}
+                </Typography>
+                <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
+                  <Chip size="small" label={`Status: ${interpretationData.attck_status || "Hypothesis"}`} sx={{ bgcolor: "#1e293b", color: "#fde68a", border: "1px solid #d97706", fontWeight: 700, fontSize: 10 }} />
+                  <Chip size="small" label={`Confidence: ${interpretationData.attck_confidence || "Medium"}`} sx={{ bgcolor: "#112a45", color: "#7dd3fc", border: "1px solid #0288d1", fontWeight: 700, fontSize: 10 }} />
+                </Stack>
+              </Box>
+
+              {/* Assessment Narrative */}
+              {interpretationData.interpretation && (
+                <Box sx={{ mt: 0.5, p: 1.2, bgcolor: "#07131e", border: "1px solid #0f2c44", borderRadius: 1.2 }}>
+                  <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 800, textTransform: "uppercase", fontSize: 9.5, display: "block", mb: 0.4 }}>
+                    ASSESSMENT
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: "#e2e8f0", fontSize: 12.5, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                    {highlightEvidence(interpretationData.interpretation)}
+                  </Typography>
+                </Box>
+              )}
+
+              {/* Numbered Examiner Tasks Checklist */}
+              {Array.isArray(interpretationData.verification_steps) && interpretationData.verification_steps.length > 0 && (
+                <Box sx={{ mt: 0.8 }}>
+                  <Typography variant="caption" sx={{ color: "#7dd3fc", fontWeight: 800, display: "block", mb: 0.6, textTransform: "uppercase", fontSize: 10 }}>
+                    EXAMINER VERIFICATION CHECKLIST:
+                  </Typography>
+                  <Stack spacing={0.6}>
+                    {interpretationData.verification_steps.map((step, idx) => {
+                      const stepStr = typeof step === "string" ? step : (step?.action || step?.text || String(step || ""));
+                      return (
+                        <Paper key={idx} sx={{ p: 0.8, px: 1.2, bgcolor: "#061320", border: "1px solid #143552", borderRadius: 1 }}>
+                          <Typography variant="body2" sx={{ color: "#cbd5e1", fontSize: 12, lineHeight: 1.4 }}>
+                            {highlightEvidence(stepStr)}
+                          </Typography>
+                        </Paper>
+                      );
+                    })}
+                  </Stack>
+                </Box>
+              )}
+            </Stack>
+          </Paper>
+        </Box>
+      )}
+
+      {/* Sticky Conclusion Summary Banner at Bottom */}
+      <Paper
+        sx={{
+          position: "sticky",
+          bottom: -10,
+          mt: 1.5,
+          p: 1.6,
+          bgcolor: "#06121c",
+          borderTop: "2px solid #0288d1",
+          borderRadius: "0 0 8px 8px",
+          boxShadow: "0 -4px 12px rgba(0,0,0,0.5)",
+          zIndex: 10,
+        }}
+      >
+        <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 800, textTransform: "uppercase", fontSize: 10, letterSpacing: "0.06em", display: "block", mb: 0.4 }}>
+          CASE CONCLUSION
+        </Typography>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.8 }}>
+          <Typography variant="h6" sx={{ color: conclusionData.status === "OBSERVED" ? "#34d399" : conclusionData.status === "NOT ESTABLISHED" ? "#cbd5e1" : "#fbbf24", fontWeight: 800, fontSize: 15 }}>
+            {conclusionData.status === "NOT ESTABLISHED" ? "○ NOT ESTABLISHED" : conclusionData.status === "OBSERVED" ? "✓ OBSERVED" : conclusionData.status || "UNDER EXAMINATION"}
+          </Typography>
+          <Stack direction="row" spacing={1}>
+            <Chip size="small" label={`Confidence: ${conclusionData.confidence}`} sx={{ bgcolor: "#0b2840", color: "#81d4fa", fontSize: 10, fontWeight: 700 }} />
+            <Chip size="small" label={conclusionData.priority} color={inv?.risk_score >= 40 ? "error" : "warning"} sx={{ fontSize: 10, fontWeight: 700 }} />
+          </Stack>
+        </Stack>
+        <Typography variant="body2" sx={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.4 }}>
+          {conclusionData.summary}
+        </Typography>
+      </Paper>
+
+      {/* Disclaimer Footer */}
+      <Paper sx={{ p: 1.2, bgcolor: "#030a12", border: "1px solid #0f2334", borderRadius: 1.2 }}>
+        <Typography variant="caption" sx={{ color: "#64748b", fontSize: 11, display: "block" }}>
+          <b>AI INVESTIGATION NOTICE:</b> General forensic knowledge is interpretive only and cannot be used as case evidence. AI is an investigative assistant, not an evidence source.
+        </Typography>
+      </Paper>
+    </Box>
+  );
+}
+
+function ForensicConsoleAnswer({
+  answer,
+  generator,
+  inv,
+  intent,
+  renderType,
+  forensicState,
+  generatedAnalysis,
+  conceptData,
+  onFocusEvidence,
+  viewMode,
+  setViewMode,
+}) {
+  if (!answer && !forensicState) return null;
+
+  // Determine effective rendering mode:
+  // - "timeline": Chronological Table + Sequence Analysis
+  // - "forensic_structured": Full DFIS Case Investigation Panel (Verdict, Evidence, Gaps, ATT&CK, Conclusion)
+  // - "markdown": Clean Educational / Forensic Knowledge Response with rich Markdown
+  const effectiveRenderType =
+    renderType ||
+    (intent === "CASE_QUERY" && forensicState?.observed_evidence?.length
+      ? "forensic_structured"
+      : intent === "CASE_TIMELINE"
+      ? "timeline"
+      : "markdown");
 
   return (
     <Paper sx={{ p: 2, bgcolor: "#07131e", border: "1px solid #0288d1", borderRadius: 2 }}>
@@ -2680,23 +3074,7 @@ function ForensicConsoleAnswer({
             {answer}
           </Typography>
         </Paper>
-      ) : isGeneral ? (
-        /* Mode 1: Pure General Educational Response */
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.4 }}>
-          <Paper sx={{ p: 2, bgcolor: "#091c2c", border: "1px solid #0369a1", borderRadius: 2 }}>
-            <Typography variant="overline" sx={{ color: "#38bdf8", fontWeight: 800, letterSpacing: "0.08em", fontSize: 10.5, display: "block", mb: 0.4 }}>
-              EDUCATIONAL EXPLANATION
-            </Typography>
-            <MarkdownView content={answer} onFocusEvidence={onFocusEvidence} />
-          </Paper>
-
-          <Paper sx={{ p: 1.2, bgcolor: "#040b12", border: "1px solid #0d2133", borderRadius: 1.2 }}>
-            <Typography variant="caption" sx={{ color: "#64748b", fontSize: 11, display: "block" }}>
-              <b>AI NOTICE:</b> General technical knowledge is informational and does not constitute case evidence.
-            </Typography>
-          </Paper>
-        </Box>
-      ) : isCaseTimeline ? (
+      ) : effectiveRenderType === "timeline" ? (
         /* Case Timeline Mode: Structured Table & AI Investigation Summary */
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.4 }}>
           <Paper sx={{ p: 2, bgcolor: "#091c2c", border: "1px solid #0288d1", borderRadius: 2 }}>
@@ -2712,484 +3090,31 @@ function ForensicConsoleAnswer({
             </Typography>
           </Paper>
         </Box>
-      ) : isCaseSummary ? (
-        /* Case Summary Mode: Executive Case Briefing */
+      ) : effectiveRenderType === "markdown" ? (
+        /* Markdown Mode: Clean Educational / Forensic Knowledge Response */
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.4 }}>
           <Paper sx={{ p: 2, bgcolor: "#091c2c", border: "1px solid #0288d1", borderRadius: 2 }}>
-            <Typography variant="overline" sx={{ color: "#38bdf8", fontWeight: 800, letterSpacing: "0.08em", fontSize: 10.5, display: "block", mb: 0.4 }}>
-              EXECUTIVE FORENSIC CASE SUMMARY
+            <Typography variant="overline" sx={{ color: intent === "GENERAL" ? "#38bdf8" : "#64748b", fontWeight: 800, letterSpacing: "0.08em", fontSize: 10.5, display: "block", mb: 0.4 }}>
+              {intent === "GENERAL" ? "EDUCATIONAL EXPLANATION" : "FORENSIC KNOWLEDGE & METHODOLOGY"}
             </Typography>
             <MarkdownView content={answer} onFocusEvidence={onFocusEvidence} />
           </Paper>
 
           <Paper sx={{ p: 1.2, bgcolor: "#040b12", border: "1px solid #0d2133", borderRadius: 1.2 }}>
             <Typography variant="caption" sx={{ color: "#64748b", fontSize: 11, display: "block" }}>
-              <b>CASE BRIEFING:</b> Executive briefing grounded in authoritative case classification.
-            </Typography>
-          </Paper>
-        </Box>
-      ) : isCaseGuidance ? (
-        /* Mode 4: Case Guidance & Recommendations */
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.4 }}>
-          <Paper sx={{ p: 2, bgcolor: "#091c2c", border: "1px solid #059669", borderRadius: 2 }}>
-            <Typography variant="overline" sx={{ color: "#34d399", fontWeight: 800, letterSpacing: "0.08em", fontSize: 10.5, display: "block", mb: 0.4 }}>
-              RECOMMENDED INVESTIGATION ACTIONS
-            </Typography>
-            <MarkdownView content={answer} onFocusEvidence={onFocusEvidence} />
-          </Paper>
-
-          <Paper sx={{ p: 1.2, bgcolor: "#040b12", border: "1px solid #0d2133", borderRadius: 1.2 }}>
-            <Typography variant="caption" sx={{ color: "#64748b", fontSize: 11, display: "block" }}>
-              <b>EXAMINER GUIDANCE:</b> All recommendations represent examiner verification steps derived from case evidentiary gaps.
-            </Typography>
-          </Paper>
-        </Box>
-      ) : isTechnicalForensic ? (
-        /* Mode 2: Technical Forensic Knowledge Response */
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.4 }}>
-          <Paper sx={{ p: 2, bgcolor: "#091c2c", border: "1px solid #0288d1", borderRadius: 2 }}>
-            <Typography variant="overline" sx={{ color: "#64748b", fontWeight: 800, letterSpacing: "0.1em", fontSize: 10, display: "block", mb: 0.4 }}>
-              FORENSIC KNOWLEDGE & METHODOLOGY
-            </Typography>
-            <MarkdownView content={answer || assessmentText} onFocusEvidence={onFocusEvidence} />
-          </Paper>
-
-          {Array.isArray(contextItems) && contextItems.length > 0 && (
-            <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
-              <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#34d399", fontSize: 11.5, textTransform: "uppercase", display: "block", mb: 1 }}>
-                Case Evidence Context
-              </Typography>
-              <Stack spacing={0.8}>
-                {contextItems.map((c, idx) => {
-                  const cStr = typeof c === "string" ? c : (c?.text || c?.description || JSON.stringify(c));
-                  return (
-                    <Box key={idx} sx={{ p: 1.2, bgcolor: "#06131d", borderLeft: "3px solid #10b981", borderRadius: "0 6px 6px 0" }}>
-                      <Typography variant="body2" sx={{ color: "#e2e8f0", fontSize: 12.5, lineHeight: 1.5 }}>
-                        {highlightEvidence(cStr)}
-                      </Typography>
-                    </Box>
-                  );
-                })}
-              </Stack>
-            </Box>
-          )}
-
-          {Array.isArray(rulesItems) && rulesItems.length > 0 && (
-            <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
-              <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#fbbf24", fontSize: 11.5, textTransform: "uppercase", display: "block", mb: 1 }}>
-                Forensic Interpretation Rules
-              </Typography>
-              <Stack spacing={1}>
-                {rulesItems.map((rule, idx) => {
-                  const rTitle = typeof rule === "string" ? rule : (rule?.title || "Forensic Rule");
-                  const rDesc = typeof rule === "string" ? "" : (rule?.desc || rule?.description || "");
-                  const rIcon = typeof rule === "string" ? "note" : (rule?.icon || "note");
-                  return (
-                    <Paper key={idx} sx={{ p: 1.4, bgcolor: "#181404", border: "1px solid #92400e", borderRadius: 1.5 }}>
-                      <Stack direction="row" spacing={1} alignItems="flex-start">
-                        {ruleIcon(rIcon)}
-                        <Box>
-                          <Typography variant="subtitle2" sx={{ color: "#fbbf24", fontWeight: 700, fontSize: 12, mb: 0.4 }}>
-                            {rTitle}
-                          </Typography>
-                          {rDesc && (
-                            <Typography variant="body2" sx={{ color: "#fef3c7", fontSize: 12, lineHeight: 1.5 }}>
-                              {highlightEvidence(rDesc)}
-                            </Typography>
-                          )}
-                        </Box>
-                      </Stack>
-                    </Paper>
-                  );
-                })}
-              </Stack>
-            </Box>
-          )}
-
-          <Paper sx={{ p: 1.2, bgcolor: "#040b12", border: "1px solid #0d2133", borderRadius: 1.2 }}>
-            <Typography variant="caption" sx={{ color: "#64748b", fontSize: 11, display: "block" }}>
-              <b>FORENSIC NOTICE:</b> {disclaimer}
+              <b>FORENSIC NOTICE:</b> General technical and forensic knowledge provides investigative guidance and does not constitute case evidence.
             </Typography>
           </Paper>
         </Box>
       ) : (
         /* Mode 3: Unified Case Investigation View */
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.6 }}>
-          {/* Primary Assessment / Verdict Card */}
-          <Paper
-            sx={{
-              p: 2,
-              bgcolor:
-                assessmentState === "OBSERVED"
-                  ? "#02261a"
-                  : assessmentState === "NOT ESTABLISHED"
-                  ? "#0f1722"
-                  : "#271704",
-              border:
-                assessmentState === "OBSERVED"
-                  ? "1px solid #059669"
-                  : assessmentState === "NOT ESTABLISHED"
-                  ? "1px solid #334155"
-                  : "1px solid #d97706",
-              borderRadius: 2,
-            }}
-          >
-            <Typography variant="overline" sx={{ color: "#64748b", fontWeight: 800, letterSpacing: "0.1em", fontSize: 10.5 }}>
-              FORENSIC ASSESSMENT
-            </Typography>
-            <Box sx={{ my: 0.8 }}>
-              <EvidenceStatusBadge status={assessmentState} />
-            </Box>
-            <Typography variant="body1" sx={{ color: "#f8fafc", fontSize: 13.5, lineHeight: 1.65, fontWeight: 500 }}>
-              {highlightEvidence(assessmentText)}
-            </Typography>
-          </Paper>
-
-          {/* 1. OBSERVED CASE EVIDENCE (Deduplicated with separate Evidence, Event, and Artifact chips) */}
-          {observedItems.length > 0 && (
-            <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
-              <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#34d399", fontSize: 11.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.8, mb: 1 }}>
-                <CheckCircleOutlineIcon sx={{ fontSize: 16 }} /> Observed Case Evidence ({observedItems.length})
-              </Typography>
-              <Stack spacing={0.8}>
-                {observedItems.map((item, idx) => (
-                  <Box key={idx} sx={{ p: 1.2, bgcolor: "#06131d", borderLeft: "3px solid #10b981", borderRadius: "0 6px 6px 0" }}>
-                    <Typography variant="subtitle2" sx={{ color: "#e2e8f0", fontSize: 12.5, fontWeight: 700 }}>
-                      {item.title}
-                    </Typography>
-                    {item.description && (
-                      <Typography variant="body2" sx={{ color: "#94a3b8", fontSize: 12, mt: 0.2 }}>
-                        {item.description}
-                      </Typography>
-                    )}
-
-                    {/* Metadata Chips: Evidence IDs, Windows Event IDs, Artifact tags */}
-                    <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.8 }}>
-                      {/* Evidence IDs Chips */}
-                      {item.evidence_ids && item.evidence_ids.length > 0 && (
-                        <Stack direction="row" spacing={0.5} alignItems="center">
-                          <Typography variant="caption" sx={{ fontSize: 10, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
-                            Evidence
-                          </Typography>
-                          {item.evidence_ids.map((id) => (
-                            <Box
-                              component="button"
-                              key={`ev-${id}`}
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (onFocusEvidence) onFocusEvidence(id);
-                              }}
-                              title={`Click to focus Artifact #${id} in Timeline`}
-                              sx={{
-                                cursor: "pointer",
-                                border: "1px solid #0288d1",
-                                bgcolor: "#0b263e",
-                                color: "#38bdf8",
-                                fontFamily: "IBM Plex Mono",
-                                fontSize: 10.5,
-                                fontWeight: 700,
-                                px: 0.8,
-                                py: 0.15,
-                                borderRadius: 1,
-                                display: "inline-flex",
-                                alignItems: "center",
-                                "&:hover": {
-                                  bgcolor: "#0288d1",
-                                  color: "#fff",
-                                  transform: "translateY(-1px)",
-                                },
-                                transition: "all 0.15s ease",
-                              }}
-                            >
-                              #{id}
-                            </Box>
-                          ))}
-                        </Stack>
-                      )}
-
-                      {/* Event IDs Chips (e.g. 4624, 6416) */}
-                      {item.event_ids && item.event_ids.length > 0 && (
-                        <Stack direction="row" spacing={0.5} alignItems="center">
-                          <Typography variant="caption" sx={{ fontSize: 10, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
-                            Event
-                          </Typography>
-                          {item.event_ids.map((eid) => (
-                            <Chip
-                              key={`event-${eid}`}
-                              size="small"
-                              label={eid}
-                              sx={{
-                                height: 18,
-                                fontSize: 10,
-                                fontWeight: 700,
-                                fontFamily: "IBM Plex Mono",
-                                bgcolor: "#1e293b",
-                                color: "#cbd5e1",
-                                border: "1px solid #475569",
-                                borderRadius: 1,
-                              }}
-                            />
-                          ))}
-                        </Stack>
-                      )}
-
-                      {/* Artifact Tags Chips (e.g. USBSTOR) */}
-                      {item.artifacts && item.artifacts.length > 0 && (
-                        <Stack direction="row" spacing={0.5} alignItems="center">
-                          <Typography variant="caption" sx={{ fontSize: 10, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
-                            Artifact
-                          </Typography>
-                          {item.artifacts.map((art) => (
-                            <Chip
-                              key={`art-${art}`}
-                              size="small"
-                              label={art}
-                              sx={{
-                                height: 18,
-                                fontSize: 10,
-                                fontWeight: 700,
-                                fontFamily: "IBM Plex Mono",
-                                bgcolor: "#142534",
-                                color: "#38bdf8",
-                                border: "1px solid #0369a1",
-                                borderRadius: 1,
-                              }}
-                            />
-                          ))}
-                        </Stack>
-                      )}
-                    </Stack>
-                  </Box>
-                ))}
-              </Stack>
-            </Box>
-          )}
-
-          {/* 2. NOT ESTABLISHED FINDINGS (Muted slate styling with ○ icon and explicit badge) */}
-          {notEstablishedItems.length > 0 && (
-            <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
-              <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#94a3b8", fontSize: 11.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.8, mb: 1 }}>
-                <span style={{ fontSize: "14px", lineHeight: 1 }}>○</span> Not Established / Unproven Findings ({notEstablishedItems.length})
-              </Typography>
-              <Stack spacing={0.8}>
-                {notEstablishedItems.map((item, idx) => (
-                  <Box key={idx} sx={{ p: 1.2, bgcolor: "#0b131e", borderLeft: "3px solid #475569", borderRadius: "0 6px 6px 0" }}>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center">
-                      <Typography variant="subtitle2" sx={{ color: "#cbd5e1", fontSize: 12.5, fontWeight: 700 }}>
-                        {item.title}
-                      </Typography>
-                      <Chip
-                        size="small"
-                        label={item.status ? item.status.replace(/_/g, " ") : "NOT ESTABLISHED"}
-                        sx={{ height: 18, fontSize: 9, fontWeight: 800, bgcolor: "#1e293b", color: "#94a3b8", border: "1px solid #334155" }}
-                      />
-                    </Stack>
-                    {item.description && (
-                      <Typography variant="body2" sx={{ color: "#64748b", fontSize: 12, mt: 0.3 }}>
-                        {item.description}
-                      </Typography>
-                    )}
-                  </Box>
-                ))}
-              </Stack>
-            </Box>
-          )}
-
-          {/* 3. INVESTIGATIVE HYPOTHESES (Amber styling with ◐ icon) */}
-          {hypothesisItems.length > 0 && (
-            <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
-              <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#fbbf24", fontSize: 11.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.8, mb: 1 }}>
-                <span style={{ fontSize: "14px", lineHeight: 1 }}>◐</span> Investigative Hypotheses ({hypothesisItems.length})
-              </Typography>
-              <Stack spacing={0.8}>
-                {hypothesisItems.map((item, idx) => (
-                  <Box key={idx} sx={{ p: 1.2, bgcolor: "#131c18", borderLeft: "3px solid #d97706", borderRadius: "0 6px 6px 0" }}>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center">
-                      <Typography variant="subtitle2" sx={{ color: "#fde68a", fontSize: 12.5, fontWeight: 700 }}>
-                        {item.title}
-                      </Typography>
-                      <Chip
-                        size="small"
-                        label={item.status || "HYPOTHESIS · CORRELATION REQUIRED"}
-                        sx={{ height: 18, fontSize: 9, fontWeight: 800, bgcolor: "#382404", color: "#fbbf24", border: "1px solid #d97706" }}
-                      />
-                    </Stack>
-                    {item.description && (
-                      <Typography variant="body2" sx={{ color: "#d97706", fontSize: 12, mt: 0.3 }}>
-                        {item.description}
-                      </Typography>
-                    )}
-                    {item.evidence_ids && item.evidence_ids.length > 0 && (
-                      <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.6 }}>
-                        <Typography variant="caption" sx={{ fontSize: 10, color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
-                          Evidence
-                        </Typography>
-                        {item.evidence_ids.map((id) => (
-                          <Box
-                            component="button"
-                            key={`hypo-ev-${id}`}
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (onFocusEvidence) onFocusEvidence(id);
-                            }}
-                            title={`Click to focus Artifact #${id} in Timeline`}
-                            sx={{
-                              cursor: "pointer",
-                              border: "1px solid #0288d1",
-                              bgcolor: "#0b263e",
-                              color: "#38bdf8",
-                              fontFamily: "IBM Plex Mono",
-                              fontSize: 10.5,
-                              fontWeight: 700,
-                              px: 0.8,
-                              py: 0.15,
-                              borderRadius: 1,
-                              display: "inline-flex",
-                              alignItems: "center",
-                              "&:hover": {
-                                bgcolor: "#0288d1",
-                                color: "#fff",
-                              },
-                              transition: "all 0.15s ease",
-                            }}
-                          >
-                            #{id}
-                          </Box>
-                        ))}
-                      </Stack>
-                    )}
-                  </Box>
-                ))}
-              </Stack>
-            </Box>
-          )}
-
-          {/* 4. EVIDENCE GAPS (Amber cards with ⚠ icon and severity tag) */}
-          {gapItems.length > 0 && (
-            <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
-              <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#fbbf24", fontSize: 11.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.8, mb: 1 }}>
-                <WarningAmberIcon sx={{ fontSize: 16 }} /> Evidence Gaps & Missing Proofs ({gapItems.length})
-              </Typography>
-              <Stack spacing={0.8}>
-                {gapItems.map((item, idx) => (
-                  <Box key={idx} sx={{ p: 1.2, bgcolor: "#15130b", borderLeft: "3px solid #b45309", borderRadius: "0 6px 6px 0" }}>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center">
-                      <Typography variant="subtitle2" sx={{ color: "#fde68a", fontSize: 12.5, fontWeight: 700 }}>
-                        {item.title}
-                      </Typography>
-                      <Chip
-                        size="small"
-                        label={item.severity || "Correlation Required"}
-                        sx={{ height: 18, fontSize: 9, fontWeight: 800, bgcolor: "#2d1f05", color: "#f59e0b", border: "1px solid #92400e" }}
-                      />
-                    </Stack>
-                    {item.description && item.description !== item.title && (
-                      <Typography variant="body2" sx={{ color: "#d97706", fontSize: 12, mt: 0.3 }}>
-                        {item.description}
-                      </Typography>
-                    )}
-                  </Box>
-                ))}
-              </Stack>
-            </Box>
-          )}
-
-          {/* 5. INVESTIGATIVE INTERPRETATION & ATT&CK ANALYSIS */}
-          {interpretationData && (
-            <Box sx={{ borderBottom: "1px solid #142a3e", pb: 1.5, mb: 1.5 }}>
-              <Typography variant="caption" sx={{ color: "#38bdf8", fontWeight: 800, fontSize: 11.5, textTransform: "uppercase", display: "block", mb: 1 }}>
-                Investigative Interpretation & ATT&CK Analysis
-              </Typography>
-              <Paper sx={{ p: 1.8, bgcolor: "#051829", border: "1px solid #0369a1", borderRadius: 1.8 }}>
-                <Stack spacing={1}>
-                  {/* ATT&CK Hypothesis Card */}
-                  <Box sx={{ p: 1, bgcolor: "#071c30", border: "1px solid #0c4a6e", borderRadius: 1.2 }}>
-                    <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 800, textTransform: "uppercase", fontSize: 9.5, display: "block" }}>
-                      ATT&CK HYPOTHESIS
-                    </Typography>
-                    <Typography variant="subtitle2" sx={{ color: "#38bdf8", fontWeight: 700, fontSize: 13, my: 0.4 }}>
-                      {interpretationData.attck_hypothesis}
-                    </Typography>
-                    <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
-                      <Chip size="small" label={`Status: ${interpretationData.attck_status}`} sx={{ bgcolor: "#1e293b", color: "#fde68a", border: "1px solid #d97706", fontWeight: 700, fontSize: 10 }} />
-                      <Chip size="small" label={`Confidence: ${interpretationData.attck_confidence}`} sx={{ bgcolor: "#112a45", color: "#7dd3fc", border: "1px solid #0288d1", fontWeight: 700, fontSize: 10 }} />
-                    </Stack>
-                  </Box>
-
-                  {/* Assessment Narrative */}
-                  {interpretationData.interpretation && (
-                    <Box sx={{ mt: 0.5, p: 1.2, bgcolor: "#07131e", border: "1px solid #0f2c44", borderRadius: 1.2 }}>
-                      <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 800, textTransform: "uppercase", fontSize: 9.5, display: "block", mb: 0.4 }}>
-                        ASSESSMENT
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: "#e2e8f0", fontSize: 12.5, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
-                        {interpretationData.interpretation}
-                      </Typography>
-                    </Box>
-                  )}
-
-                  {/* Numbered Examiner Tasks Checklist */}
-                  {interpretationData.verification_steps && interpretationData.verification_steps.length > 0 && (
-                    <Box sx={{ mt: 0.8 }}>
-                      <Typography variant="caption" sx={{ color: "#7dd3fc", fontWeight: 800, display: "block", mb: 0.6, textTransform: "uppercase", fontSize: 10 }}>
-                        EXAMINER VERIFICATION CHECKLIST:
-                      </Typography>
-                      <Stack spacing={0.6}>
-                        {interpretationData.verification_steps.map((step, idx) => (
-                          <Paper key={idx} sx={{ p: 0.8, px: 1.2, bgcolor: "#061320", border: "1px solid #143552", borderRadius: 1 }}>
-                            <Typography variant="body2" sx={{ color: "#cbd5e1", fontSize: 12, lineHeight: 1.4 }}>
-                              {step}
-                            </Typography>
-                          </Paper>
-                        ))}
-                      </Stack>
-                    </Box>
-                  )}
-                </Stack>
-              </Paper>
-            </Box>
-          )}
-
-          {/* Sticky Conclusion Summary Banner at Bottom */}
-          <Paper
-            sx={{
-              position: "sticky",
-              bottom: -10,
-              mt: 1.5,
-              p: 1.6,
-              bgcolor: "#06121c",
-              borderTop: "2px solid #0288d1",
-              borderRadius: "0 0 8px 8px",
-              boxShadow: "0 -4px 12px rgba(0,0,0,0.5)",
-              zIndex: 10,
-            }}
-          >
-            <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 800, textTransform: "uppercase", fontSize: 10, letterSpacing: "0.06em", display: "block", mb: 0.4 }}>
-              CASE CONCLUSION
-            </Typography>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.8 }}>
-              <Typography variant="h6" sx={{ color: conclusionData.status === "OBSERVED" ? "#34d399" : conclusionData.status === "NOT ESTABLISHED" ? "#cbd5e1" : "#fbbf24", fontWeight: 800, fontSize: 15 }}>
-                {conclusionData.status === "NOT ESTABLISHED" ? "○ NOT ESTABLISHED" : conclusionData.status === "OBSERVED" ? "✓ OBSERVED" : conclusionData.status || "UNDER EXAMINATION"}
-              </Typography>
-              <Stack direction="row" spacing={1}>
-                <Chip size="small" label={`Confidence: ${conclusionData.confidence}`} sx={{ bgcolor: "#0b2840", color: "#81d4fa", fontSize: 10, fontWeight: 700 }} />
-                <Chip size="small" label={conclusionData.priority} color={inv?.risk_score >= 40 ? "error" : "warning"} sx={{ fontSize: 10, fontWeight: 700 }} />
-              </Stack>
-            </Stack>
-            <Typography variant="body2" sx={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.4 }}>
-              {conclusionData.summary}
-            </Typography>
-          </Paper>
-
-          {/* Disclaimer Footer */}
-          <Paper sx={{ p: 1.2, bgcolor: "#030a12", border: "1px solid #0f2334", borderRadius: 1.2 }}>
-            <Typography variant="caption" sx={{ color: "#64748b", fontSize: 11, display: "block" }}>
-              <b>AI INVESTIGATION NOTICE:</b> {disclaimer}
-            </Typography>
-          </Paper>
-        </Box>
+        <ForensicStructuredPanel
+          forensicState={forensicState}
+          generatedAnalysis={generatedAnalysis}
+          answer={answer}
+          inv={inv}
+          onFocusEvidence={onFocusEvidence}
+        />
       )}
     </Paper>
   );

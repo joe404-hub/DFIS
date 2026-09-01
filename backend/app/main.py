@@ -648,6 +648,7 @@ def chat(case_id: int, body: ChatIn, db: Session = Depends(get_db)):
     return {
         "answer": chat_res.get("answer"),
         "intent": chat_res.get("intent", "CASE_QUERY"),
+        "render_type": chat_res.get("render_type", "markdown"),
         "model": chat_res.get("model", "llama3.2:3b"),
         "provider": chat_res.get("provider", "ollama"),
         "llm_mode": chat_res.get("llm_mode"),
