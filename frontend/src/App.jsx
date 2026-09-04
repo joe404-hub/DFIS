@@ -64,8 +64,8 @@ import PushPinIcon from "@mui/icons-material/PushPin";
 import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
 import ViewSidebarIcon from "@mui/icons-material/ViewSidebar";
 import { DataSet } from "vis-data";
-import { Timeline } from "vis-timeline/standalone";
-import { Network } from "vis-network/standalone";
+import { Timeline } from "vis-timeline";
+import { Network } from "vis-network";
 import "vis-timeline/styles/vis-timeline-graph2d.css";
 
 const api = (path, opts) => fetch(path, opts).then((r) => (r.ok ? r : Promise.reject(r)));
@@ -221,9 +221,13 @@ export default function App() {
   const netInst = useRef(null);
 
   const loadCases = async () => {
-    const r = await api("/api/cases").then((x) => x.json());
-    setCases(r);
-    if (!active && r[0]) setActive(r[0].id);
+    try {
+      const r = await api("/api/cases").then((x) => x.json());
+      setCases(r || []);
+      if (!active && r && r.length > 0) setActive(r[0].id);
+    } catch (e) {
+      console.error("Failed to load cases:", e);
+    }
   };
 
   const loadCase = async (id) => {
