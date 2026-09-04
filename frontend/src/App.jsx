@@ -41,6 +41,7 @@ import "vis-timeline/styles/vis-timeline-graph2d.css";
 import Sidebar from "./components/Sidebar.jsx";
 import TimelineWorkspace from "./components/TimelineWorkspace.jsx";
 import LocalAiCopilot from "./components/LocalAiCopilot.jsx";
+import EventInspectorDrawer from "./components/EventInspectorDrawer.jsx";
 import EvidenceStatusBadge from "./components/EvidenceStatusBadge.jsx";
 import { NewCaseModal, IngestModal, AcquireModal, LlmConfigModal } from "./components/Modals.jsx";
 import { escapeHtml, riskClass, sourceColor, formatClassification, parseForensicAnswer } from "./utils/forensicParser.js";
@@ -103,6 +104,7 @@ export default function App() {
   const [chatViewMode, setChatViewMode] = useState("console");
   const [llmStatus, setLlmStatus] = useState(null);
   const [llmModal, setLlmModal] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [llmConfig, setLlmConfig] = useState(() => {
     try {
       const saved = localStorage.getItem("dfis_llm_config");
@@ -322,10 +324,10 @@ export default function App() {
         stack: true,
         stackSubgroups: true,
         orientation: "top",
-        margin: { item: { horizontal: 6, vertical: 8 }, axis: 6 },
+        margin: { item: { horizontal: 8, vertical: 10 }, axis: 6 },
         zoomKey: "ctrlKey",
-        minHeight: "280px",
-        maxHeight: "380px",
+        minHeight: "300px",
+        maxHeight: "440px",
         verticalScroll: true,
         showCurrentTime: false,
       });
@@ -669,7 +671,7 @@ export default function App() {
         }
       `}</style>
 
-      {/* TOP NAVIGATION BAR (Fixed height: 56px) */}
+      {/* TOP NAVIGATION BAR (Structured DFIR Workstation Banner) */}
       <AppBar
         position="static"
         sx={{
@@ -725,7 +727,7 @@ export default function App() {
             </Typography>
           </Stack>
 
-          {/* Active Case Context Banner (Middle) */}
+          {/* Active Case Context Banner (Structured DFIR Layout) */}
           {detail && (
             <Stack direction="row" spacing={1.2} alignItems="center" sx={{ display: { xs: "none", md: "flex" } }}>
               <Chip
@@ -741,17 +743,17 @@ export default function App() {
                   height: 22,
                 }}
               />
-              <Typography variant="body2" sx={{ color: "#eefaf4", fontWeight: 700, fontSize: 12.5, maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <Typography variant="body2" sx={{ color: "#eefaf4", fontWeight: 700, fontSize: 12.5, maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {detail.title}
               </Typography>
+              <span style={{ color: "#2a4a3a" }}>•</span>
+              <Typography variant="caption" sx={{ color: "#8fa89d", fontSize: 11, fontFamily: "JetBrains Mono" }}>
+                {timeline.length} ARTIFACTS
+              </Typography>
+              <span style={{ color: "#2a4a3a" }}>•</span>
               <Chip
                 size="small"
-                label={`${timeline.length} Artifacts`}
-                sx={{ height: 20, fontSize: 9.5, fontWeight: 700, bgcolor: "#08140f", color: "#8fa89d", border: "1px solid rgba(61, 255, 174, 0.1)" }}
-              />
-              <Chip
-                size="small"
-                label={`Risk: ${risk}/100`}
+                label={risk >= 40 ? "RISK: HIGH (Confidence: Medium)" : "RISK: LOW"}
                 sx={{
                   height: 20,
                   fontSize: 9.5,
@@ -936,6 +938,7 @@ export default function App() {
                 tableContainerRef={tableContainerRef}
                 onOpenAcquire={() => setAcquireModal(true)}
                 onUploadFile={upload}
+                onOpenInspector={() => setInspectorOpen(true)}
               />
             )}
 
@@ -1158,6 +1161,19 @@ export default function App() {
         </Box>
 
       </Box>
+
+      {/* Artifact Inspector Drawer */}
+      <EventInspectorDrawer
+        open={inspectorOpen}
+        onClose={() => setInspectorOpen(false)}
+        event={selectedEvent}
+        timeline={filteredTimeline}
+        onSelectEvent={handleSelectEvent}
+        onAskAi={(query) => {
+          setQ(query);
+          ask(query);
+        }}
+      />
 
       {/* Case Creation Dialog */}
       <NewCaseModal

@@ -9,7 +9,6 @@ import {
   Paper,
   Stack,
   TextField,
-  Tooltip,
   Typography,
 } from "@mui/material";
 import SmartToyIcon from "@mui/icons-material/SmartToy";
@@ -20,6 +19,7 @@ import CheckBoxOutlineBlankIcon from "@mui/icons-material/CheckBoxOutlineBlank";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
+import SendIcon from "@mui/icons-material/Send";
 
 import GenerationProvenanceCard from "./GenerationProvenanceCard.jsx";
 import ChatErrorBoundary from "./ChatErrorBoundary.jsx";
@@ -59,6 +59,35 @@ export default function LocalAiCopilot({
   };
 
   const isKnowledge = answerMeta?.intent === "GENERAL" || answerMeta?.intent === "FORENSIC_KNOWLEDGE";
+
+  // Context-aware dynamic suggestion chips
+  const contextualPrompts = selectedEvent
+    ? [
+        {
+          label: `✦ Investigate Event #${selectedEvent.id}`,
+          query: `Explain the forensic significance of Artifact #${selectedEvent.id} (${selectedEvent.event_type} - ${selectedEvent.target || selectedEvent.object || selectedEvent.description}) in this case.`,
+        },
+        {
+          label: "✦ Show Related Activity",
+          query: `What forensic activity preceded or followed Artifact #${selectedEvent.id} (${selectedEvent.event_type})?`,
+        },
+        {
+          label: `✦ Check Evidence Gaps for #${selectedEvent.id}`,
+          query: `What evidence gaps or unverified assertions exist regarding Artifact #${selectedEvent.id}?`,
+        },
+      ]
+    : [
+        { label: "✦ Generate Timeline", query: "generate the timeline of events occurred" },
+        { label: "✦ Find Suspicious Activity", query: "how could we find the suspicious activity taken place?" },
+        { label: "✦ Evidence Gaps", query: "What are the evidence gaps in this investigation?" },
+      ];
+
+  const secondaryPrompts = [
+    { label: "Was USB mounted?", query: "Was confidential data copied to USB?" },
+    { label: "Recommend next steps", query: "What are the recommended next steps?" },
+    { label: "Summarize case", query: "summarize the case" },
+    { label: "Explain DFIR methodology", query: "What is the forensic methodology for investigating suspected insider threat exfiltration?" },
+  ];
 
   return (
     <Paper
@@ -189,9 +218,9 @@ export default function LocalAiCopilot({
               fontSize: 8.5,
               fontWeight: 800,
               fontFamily: "JetBrains Mono, monospace",
-              bgcolor: "rgba(61, 255, 174, 0.08)",
-              color: "#3dffae",
-              border: "1px solid rgba(61, 255, 174, 0.2)",
+              bgcolor: isKnowledge ? "rgba(109, 255, 199, 0.08)" : "rgba(61, 255, 174, 0.08)",
+              color: isKnowledge ? "#6dffc7" : "#3dffae",
+              border: `1px solid ${isKnowledge ? "rgba(109, 255, 199, 0.2)" : "rgba(61, 255, 174, 0.2)"}`,
             }}
           />
         </Box>
@@ -211,7 +240,7 @@ export default function LocalAiCopilot({
               <Stack direction="row" spacing={0.8} alignItems="center">
                 <AutoFixHighIcon sx={{ color: "#3dffae", fontSize: 14 }} />
                 <Typography variant="caption" sx={{ color: "#3dffae", fontWeight: 800, fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>
-                  CURRENT TIMELINE SELECTION
+                  TIMELINE CONTEXT
                 </Typography>
                 <Chip size="small" label={`#${selectedEvent.id}`} sx={{ height: 16, fontSize: 9, fontWeight: 800, fontFamily: "JetBrains Mono", bgcolor: "rgba(61, 255, 174, 0.15)", color: "#3dffae" }} />
               </Stack>
@@ -282,7 +311,7 @@ export default function LocalAiCopilot({
         )}
       </Box>
 
-      {/* 3. CLEAN CURATED SUGGESTIONS STRIP (3 PRIMARY CHIPS + EXPANDABLE "MORE") */}
+      {/* 3. CONTEXT-AWARE SUGGESTIONS STRIP (3 Contextual Chips + Expandable "More") */}
       <Box
         className="ai-suggestions"
         sx={{
@@ -296,11 +325,7 @@ export default function LocalAiCopilot({
         }}
       >
         <Stack direction="row" spacing={0.6} alignItems="center" sx={{ overflowX: "auto", whiteSpace: "nowrap" }}>
-          {[
-            { label: "✦ Generate Timeline", query: "generate the timeline of events occurred" },
-            { label: "✦ Find Suspicious Activity", query: "how could we find the suspicious activity taken place?" },
-            { label: "✦ Evidence Gaps", query: "What are the evidence gaps in this investigation?" },
-          ].map((sug, i) => (
+          {contextualPrompts.map((sug, i) => (
             <Chip
               key={i}
               size="small"
@@ -308,18 +333,18 @@ export default function LocalAiCopilot({
               clickable
               onClick={() => {
                 setQ(sug.query);
-                ask(sug.query);
+                handleAskWithContext(sug.query);
               }}
               sx={{
                 flexShrink: 0,
                 fontSize: 10,
                 height: 22,
                 fontWeight: 600,
-                bgcolor: "rgba(61, 255, 174, 0.06)",
-                color: "#8fa89d",
-                border: "1px solid rgba(61, 255, 174, 0.14)",
+                bgcolor: selectedEvent ? "rgba(61, 255, 174, 0.1)" : "rgba(61, 255, 174, 0.06)",
+                color: selectedEvent ? "#3dffae" : "#8fa89d",
+                border: `1px solid ${selectedEvent ? "rgba(61, 255, 174, 0.3)" : "rgba(61, 255, 174, 0.14)"}`,
                 "&:hover": {
-                  bgcolor: "rgba(61, 255, 174, 0.14)",
+                  bgcolor: "rgba(61, 255, 174, 0.18)",
                   color: "#3dffae",
                   borderColor: "#3dffae",
                 },
@@ -349,12 +374,7 @@ export default function LocalAiCopilot({
         {/* Collapsible secondary prompt chips */}
         <Collapse in={showMoreSuggestions}>
           <Stack direction="row" spacing={0.6} flexWrap="wrap" useFlexGap sx={{ pt: 0.4 }}>
-            {[
-              { label: "Was USB mounted?", query: "Was confidential data copied to USB?" },
-              { label: "Recommend next steps", query: "What are the recommended next steps?" },
-              { label: "Summarize case", query: "summarize the case" },
-              { label: "Explain forensic methodology", query: "What is the DFIR methodology for insider threats?" },
-            ].map((sug, i) => (
+            {secondaryPrompts.map((sug, i) => (
               <Chip
                 key={`more-${i}`}
                 size="small"
@@ -362,7 +382,7 @@ export default function LocalAiCopilot({
                 clickable
                 onClick={() => {
                   setQ(sug.query);
-                  ask(sug.query);
+                  handleAskWithContext(sug.query);
                 }}
                 sx={{
                   fontSize: 9.5,
@@ -378,7 +398,7 @@ export default function LocalAiCopilot({
         </Collapse>
       </Box>
 
-      {/* 4. PINNED BOTTOM CHAT INPUT BAR WITH CONTEXT TOGGLES */}
+      {/* 4. PINNED BOTTOM CHAT INPUT BAR WITH 2-TIER WORKSTATION LAYOUT */}
       <Box
         className="ai-input-container"
         sx={{

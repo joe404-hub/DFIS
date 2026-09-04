@@ -22,6 +22,8 @@ import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import ZoomInIcon from "@mui/icons-material/ZoomIn";
 import ZoomOutIcon from "@mui/icons-material/ZoomOut";
 import CenterFocusStrongIcon from "@mui/icons-material/CenterFocusStrong";
+import VisibilityIcon from "@mui/icons-material/Visibility";
+import CloseIcon from "@mui/icons-material/Close";
 import { sourceColor } from "../utils/forensicParser.js";
 
 export default function TimelineWorkspace({
@@ -39,6 +41,7 @@ export default function TimelineWorkspace({
   tableContainerRef,
   onOpenAcquire,
   onUploadFile,
+  onOpenInspector,
 }) {
   const handleZoomIn = () => {
     if (tlInst && tlInst.current) {
@@ -66,7 +69,7 @@ export default function TimelineWorkspace({
 
   return (
     <Box sx={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
-      {/* 1. DEDICATED TIMELINE CONTROLS BAR (Search + Filter Chips + Actions) */}
+      {/* 1. TIMELINE CONTROLS BAR (Search + Filter Chips + Actions) */}
       <Box
         className="timeline-controls"
         sx={{
@@ -139,7 +142,7 @@ export default function TimelineWorkspace({
           ))}
         </Stack>
 
-        {/* Evidence Acquisition & Ingest Actions */}
+        {/* Evidence Actions */}
         <Stack direction="row" spacing={0.8} alignItems="center">
           <Button
             size="small"
@@ -178,13 +181,13 @@ export default function TimelineWorkspace({
         </Stack>
       </Box>
 
-      {/* 2. VISUAL TIMELINE MAP SECTION (Increased height ~38vh / 320px) */}
+      {/* 2. VISUAL TIMELINE MAP SECTION (Increased proportional height 46–50%) */}
       <Box
         className="timeline-map"
         sx={{
-          flex: "0 0 320px",
-          minHeight: "300px",
-          maxHeight: "420px",
+          flex: "0 0 350px",
+          minHeight: "320px",
+          maxHeight: "440px",
           p: "8px 16px",
           bgcolor: "#050f0b",
           borderBottom: "1px solid rgba(61, 255, 174, 0.12)",
@@ -194,7 +197,7 @@ export default function TimelineWorkspace({
           flexDirection: "column",
         }}
       >
-        {/* Timeline Map Header with Title & Zoom Controls */}
+        {/* Header with Title & Zoom Controls */}
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 0.6, flexShrink: 0 }}>
           <Typography variant="overline" sx={{ color: "#3dffae", fontWeight: 800, fontSize: 10, letterSpacing: "0.12em" }}>
             VISUAL EVENT TIMELINE & CORRELATION LANES
@@ -254,62 +257,106 @@ export default function TimelineWorkspace({
           </Stack>
         </Box>
 
-        {/* Vis Timeline Container */}
+        {/* Vis Timeline Canvas */}
         <Box ref={tlRef} sx={{ width: "100%", flex: 1, minHeight: 0 }} />
       </Box>
 
-      {/* 3. SELECTED EVENT INSPECTOR STRIP (When an event is active) */}
+      {/* 3. REDESIGNED SELECTED EVENT CONTEXT CARD (Strong, high-contrast, height ~46px) */}
       {selectedEvent && (
         <Box
+          className="selected-event-bar"
           sx={{
             flexShrink: 0,
             px: 2,
-            py: 0.8,
-            bgcolor: "#0d1e16",
-            borderBottom: "1px solid rgba(61, 255, 174, 0.25)",
-            boxShadow: "inset 0 0 15px rgba(61, 255, 174, 0.08)",
+            py: 1,
+            bgcolor: "#0b1c14",
+            borderBottom: "1px solid rgba(61, 255, 174, 0.3)",
+            boxShadow: "inset 0 0 20px rgba(61, 255, 174, 0.08)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
             gap: 1.5,
           }}
         >
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
+          {/* Left Context Tokens */}
+          <Stack direction="row" spacing={1.2} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
             <Box
               sx={{
                 fontFamily: "JetBrains Mono, monospace",
-                fontSize: 10,
+                fontSize: 11,
                 fontWeight: 800,
-                px: 0.8,
-                py: 0.2,
-                borderRadius: "4px",
-                bgcolor: "rgba(61, 255, 174, 0.14)",
+                px: 1,
+                py: 0.25,
+                borderRadius: "5px",
+                bgcolor: "rgba(61, 255, 174, 0.16)",
                 color: "#3dffae",
-                border: "1px solid rgba(61, 255, 174, 0.35)",
+                border: "1px solid rgba(61, 255, 174, 0.4)",
+                boxShadow: "0 0 10px rgba(61, 255, 174, 0.2)",
+                whiteSpace: "nowrap",
               }}
             >
-              SELECTED ARTIFACT #{selectedEvent.id}
+              #{selectedEvent.id}
             </Box>
+
             <Chip
               size="small"
               label={selectedEvent.source_type}
-              sx={{ bgcolor: sourceColor(selectedEvent.source_type), color: "#fff", fontWeight: 700, height: 18, fontSize: 9.5 }}
+              sx={{
+                bgcolor: sourceColor(selectedEvent.source_type),
+                color: "#fff",
+                fontWeight: 800,
+                height: 20,
+                fontSize: 9.5,
+                textTransform: "uppercase",
+              }}
             />
-            <Typography variant="body2" sx={{ color: "#eefaf4", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }}>
-              {selectedEvent.event_type}
-            </Typography>
-            <Typography variant="caption" sx={{ color: "#8fa89d", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {selectedEvent.description}
-            </Typography>
+
+            <Box sx={{ minWidth: 0 }}>
+              <Stack direction="row" spacing={0.8} alignItems="baseline">
+                <Typography variant="body2" sx={{ color: "#eefaf4", fontWeight: 800, fontSize: 12.5, whiteSpace: "nowrap" }}>
+                  {selectedEvent.event_type}
+                </Typography>
+                {selectedEvent.target && (
+                  <Typography variant="caption" sx={{ color: "#3dffae", fontFamily: "JetBrains Mono, monospace", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    → {selectedEvent.target}
+                  </Typography>
+                )}
+              </Stack>
+              <Typography variant="caption" sx={{ color: "#8fa89d", fontSize: 11, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {selectedEvent.description}
+              </Typography>
+            </Box>
           </Stack>
 
-          <Button
-            size="small"
-            onClick={() => setSelectedEvent(null)}
-            sx={{ color: "#8fa89d", fontSize: 10.5, minWidth: "auto", py: 0.2, px: 0.8, "&:hover": { color: "#3dffae" } }}
-          >
-            Clear Selection ✕
-          </Button>
+          {/* Right Action Buttons */}
+          <Stack direction="row" spacing={0.8} alignItems="center" sx={{ flexShrink: 0 }}>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<VisibilityIcon sx={{ fontSize: 13 }} />}
+              onClick={onOpenInspector}
+              sx={{
+                fontSize: 10.5,
+                fontWeight: 700,
+                py: 0.2,
+                px: 1,
+                borderColor: "rgba(61, 255, 174, 0.3)",
+                color: "#3dffae",
+                "&:hover": { borderColor: "#3dffae", bgcolor: "rgba(61, 255, 174, 0.1)" },
+              }}
+            >
+              Inspect 🔍
+            </Button>
+
+            <IconButton
+              size="small"
+              onClick={() => setSelectedEvent(null)}
+              title="Clear Selection"
+              sx={{ color: "#8fa89d", "&:hover": { color: "#ff6565" } }}
+            >
+              <CloseIcon sx={{ fontSize: 16 }} />
+            </IconButton>
+          </Stack>
         </Box>
       )}
 
@@ -347,7 +394,7 @@ export default function TimelineWorkspace({
           />
         </Stack>
         <Typography variant="caption" sx={{ color: "#52685e", fontSize: 10, fontFamily: "JetBrains Mono, monospace" }}>
-          Click row to sync with visual timeline & AI
+          Click row to select • Double click to inspect
         </Typography>
       </Box>
 
@@ -382,6 +429,10 @@ export default function TimelineWorkspace({
                   id={`timeline-row-${e.id}`}
                   hover
                   onClick={() => handleSelectEvent(e)}
+                  onDoubleClick={() => {
+                    handleSelectEvent(e);
+                    if (onOpenInspector) onOpenInspector();
+                  }}
                   sx={{
                     cursor: "pointer",
                     bgcolor: isSelected
