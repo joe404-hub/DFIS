@@ -1154,6 +1154,7 @@ export default function App() {
             focusEvidence={focusEvidence}
             onOpenSettings={() => setLlmModal(true)}
             selectedEvent={selectedEvent}
+            setSelectedEvent={setSelectedEvent}
             caseNumber={detail?.case_number}
             artifactCount={timeline.length}
           />

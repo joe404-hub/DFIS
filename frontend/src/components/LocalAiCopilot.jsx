@@ -18,8 +18,8 @@ import CheckBoxIcon from "@mui/icons-material/CheckBox";
 import CheckBoxOutlineBlankIcon from "@mui/icons-material/CheckBoxOutlineBlank";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import CloseIcon from "@mui/icons-material/Close";
 import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
-import SendIcon from "@mui/icons-material/Send";
 
 import GenerationProvenanceCard from "./GenerationProvenanceCard.jsx";
 import ChatErrorBoundary from "./ChatErrorBoundary.jsx";
@@ -40,6 +40,7 @@ export default function LocalAiCopilot({
   focusEvidence,
   onOpenSettings,
   selectedEvent,
+  setSelectedEvent,
   caseNumber,
   artifactCount,
 }) {
@@ -60,27 +61,87 @@ export default function LocalAiCopilot({
 
   const isKnowledge = answerMeta?.intent === "GENERAL" || answerMeta?.intent === "FORENSIC_KNOWLEDGE";
 
-  // Context-aware dynamic suggestion chips
-  const contextualPrompts = selectedEvent
-    ? [
-        {
-          label: `✦ Investigate Event #${selectedEvent.id}`,
-          query: `Explain the forensic significance of Artifact #${selectedEvent.id} (${selectedEvent.event_type} - ${selectedEvent.target || selectedEvent.object || selectedEvent.description}) in this case.`,
-        },
-        {
-          label: "✦ Show Related Activity",
-          query: `What forensic activity preceded or followed Artifact #${selectedEvent.id} (${selectedEvent.event_type})?`,
-        },
-        {
-          label: `✦ Check Evidence Gaps for #${selectedEvent.id}`,
-          query: `What evidence gaps or unverified assertions exist regarding Artifact #${selectedEvent.id}?`,
-        },
-      ]
-    : [
+  // Context-aware dynamic suggestion chips based on selected event type
+  const getContextualPrompts = () => {
+    if (!selectedEvent) {
+      return [
         { label: "✦ Generate Timeline", query: "generate the timeline of events occurred" },
         { label: "✦ Find Suspicious Activity", query: "how could we find the suspicious activity taken place?" },
         { label: "✦ Evidence Gaps", query: "What are the evidence gaps in this investigation?" },
       ];
+    }
+
+    const src = (selectedEvent.source_type || "").toLowerCase();
+    const type = (selectedEvent.event_type || "").toLowerCase();
+
+    if (src.includes("network") || type.includes("network") || type.includes("flow") || type.includes("url")) {
+      return [
+        {
+          label: `✦ Investigate Connection #${selectedEvent.id}`,
+          query: `Analyze the forensic significance of network connection Artifact #${selectedEvent.id} (${selectedEvent.target || selectedEvent.object || selectedEvent.description}). Is this an exfiltration endpoint?`,
+        },
+        {
+          label: "✦ Show Related Endpoints",
+          query: `What network destinations or browser requests are correlated with Artifact #${selectedEvent.id}?`,
+        },
+        {
+          label: "✦ Trace Preceding Logon",
+          query: `What authentication and user session activity preceded network event #${selectedEvent.id}?`,
+        },
+      ];
+    }
+
+    if (src.includes("filesystem") || type.includes("file") || type.includes("copy") || type.includes("access")) {
+      return [
+        {
+          label: `✦ Investigate File Access #${selectedEvent.id}`,
+          query: `Explain the forensic significance of file activity Artifact #${selectedEvent.id} (${selectedEvent.target || selectedEvent.object || selectedEvent.description}). Was confidential data staged?`,
+        },
+        {
+          label: "✦ Find Related File Copies",
+          query: `Are there corresponding file copy or staging events linked to Artifact #${selectedEvent.id}?`,
+        },
+        {
+          label: `✦ Check Evidence Gaps for #${selectedEvent.id}`,
+          query: `What evidence gaps exist regarding whether the file in Artifact #${selectedEvent.id} was copied to removable storage?`,
+        },
+      ];
+    }
+
+    if (src.includes("windows") || type.includes("logon") || type.includes("service") || type.includes("process")) {
+      return [
+        {
+          label: `✦ Investigate Event #${selectedEvent.id}`,
+          query: `Analyze Windows Event #${selectedEvent.id} (${selectedEvent.event_type} - ${selectedEvent.description}). Does it indicate unauthorized access or persistence?`,
+        },
+        {
+          label: "✦ Trace User Session Activity",
+          query: `Trace all forensic actions executed during the logon session for Artifact #${selectedEvent.id}.`,
+        },
+        {
+          label: "✦ Find Subsequent Actions",
+          query: `What actions occurred immediately after event #${selectedEvent.id}?`,
+        },
+      ];
+    }
+
+    return [
+      {
+        label: `✦ Investigate Artifact #${selectedEvent.id}`,
+        query: `Explain the forensic significance of Artifact #${selectedEvent.id} (${selectedEvent.event_type} - ${selectedEvent.target || selectedEvent.object || selectedEvent.description}).`,
+      },
+      {
+        label: "✦ Show Related Activity",
+        query: `What activity preceded or followed Artifact #${selectedEvent.id}?`,
+      },
+      {
+        label: `✦ Check Evidence Gaps for #${selectedEvent.id}`,
+        query: `What evidence gaps exist regarding Artifact #${selectedEvent.id}?`,
+      },
+    ];
+  };
+
+  const contextualPrompts = getContextualPrompts();
 
   const secondaryPrompts = [
     { label: "Was USB mounted?", query: "Was confidential data copied to USB?" },
@@ -105,7 +166,7 @@ export default function LocalAiCopilot({
         boxShadow: "0 10px 40px rgba(0,0,0,0.4)",
       }}
     >
-      {/* 1. COPILOT HEADER WITH CLEAR MODE INDICATOR */}
+      {/* 1. COPILOT HEADER */}
       <Box
         sx={{
           flexShrink: 0,
@@ -189,76 +250,28 @@ export default function LocalAiCopilot({
         </Stack>
       </Box>
 
-      {/* 2. SCROLLABLE CHAT & FORENSIC ANALYSIS AREA (With 18px 20px padding and 65ch width) */}
+      {/* 2. SCROLLABLE CHAT & FORENSIC ANALYSIS AREA (Streamlined single provenance card + response) */}
       <Box
         className="ai-chat-content"
         sx={{
           flex: 1,
           minHeight: 0,
           overflowY: "auto",
-          p: { xs: 1.8, md: 2.2 },
+          p: { xs: 1.8, md: 2 },
           display: "flex",
           flexDirection: "column",
-          gap: 1.5,
+          gap: 1.4,
         }}
       >
-        {/* Air-gap guarantee badge */}
-        <Box sx={{ p: 0.9, px: 1.4, bgcolor: "#040a08", border: "1px solid rgba(61, 255, 174, 0.1)", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <LockIcon sx={{ fontSize: 13, color: "#3dffae" }} />
-            <Typography variant="caption" sx={{ color: "#8fa89d", fontSize: 10.5 }}>
-              <b style={{ color: "#eefaf4" }}>Air-Gapped Workstation:</b> <code>llama3.2:3b</code> local inference.
-            </Typography>
-          </Stack>
-          <Chip
-            size="small"
-            label={isKnowledge ? "MODE: GENERAL KNOWLEDGE" : "MODE: EVIDENCE-GROUNDED"}
-            sx={{
-              height: 18,
-              fontSize: 8.5,
-              fontWeight: 800,
-              fontFamily: "JetBrains Mono, monospace",
-              bgcolor: isKnowledge ? "rgba(109, 255, 199, 0.08)" : "rgba(61, 255, 174, 0.08)",
-              color: isKnowledge ? "#6dffc7" : "#3dffae",
-              border: `1px solid ${isKnowledge ? "rgba(109, 255, 199, 0.2)" : "rgba(61, 255, 174, 0.2)"}`,
-            }}
-          />
-        </Box>
-
-        {/* Currently Selected Event Context Strip in AI Panel */}
-        {selectedEvent && (
-          <Paper
-            sx={{
-              p: 1.2,
-              bgcolor: "#0d1e16",
-              border: "1px solid rgba(61, 255, 174, 0.3)",
-              borderRadius: "8px",
-              boxShadow: "0 0 15px rgba(61, 255, 174, 0.08)",
-            }}
-          >
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Stack direction="row" spacing={0.8} alignItems="center">
-                <AutoFixHighIcon sx={{ color: "#3dffae", fontSize: 14 }} />
-                <Typography variant="caption" sx={{ color: "#3dffae", fontWeight: 800, fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>
-                  TIMELINE CONTEXT
-                </Typography>
-                <Chip size="small" label={`#${selectedEvent.id}`} sx={{ height: 16, fontSize: 9, fontWeight: 800, fontFamily: "JetBrains Mono", bgcolor: "rgba(61, 255, 174, 0.15)", color: "#3dffae" }} />
-              </Stack>
-
-              <Button
-                size="small"
-                variant="text"
-                onClick={() => handleAskWithContext(`Explain the forensic significance of artifact #${selectedEvent.id} (${selectedEvent.event_type} - ${selectedEvent.target || selectedEvent.object || selectedEvent.description})`)}
-                sx={{ fontSize: 10, py: 0.1, px: 0.8, color: "#3dffae", textTransform: "none", fontWeight: 700, "&:hover": { bgcolor: "rgba(61, 255, 174, 0.1)" } }}
-              >
-                Ask AI about this event →
-              </Button>
-            </Stack>
-            <Typography variant="body2" sx={{ color: "#eefaf4", fontSize: 11.5, mt: 0.4, lineHeight: 1.3 }}>
-              <b>{selectedEvent.event_type}</b> {selectedEvent.target ? `on ${selectedEvent.target}` : ""} • {selectedEvent.description}
-            </Typography>
-          </Paper>
-        )}
+        {/* Single Merged Investigation & AI Context Header */}
+        <GenerationProvenanceCard
+          generator={generator || { type: "llm", provider: "ollama", model: llmStatus?.model || "llama3.2:3b", fallback: !llmStatus?.connected }}
+          intent={answerMeta?.intent}
+          caseNumber={caseNumber}
+          artifactCount={artifactCount}
+          selectedEvent={selectedEvent}
+          onFocusEvidence={focusEvidence}
+        />
 
         {busy ? (
           /* Reasoning Progress */
@@ -273,30 +286,21 @@ export default function LocalAiCopilot({
           </Box>
         ) : answer ? (
           /* Active Forensic Answer */
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-            <GenerationProvenanceCard
+          <ChatErrorBoundary fallbackText={answer}>
+            <ForensicConsoleAnswer
+              answer={answer}
               generator={generator}
+              inv={inv}
               intent={answerMeta?.intent}
-              caseNumber={caseNumber}
-              artifactCount={artifactCount}
+              renderType={answerMeta?.render_type}
               forensicState={answerMeta?.forensic_state}
+              generatedAnalysis={answerMeta?.generated_analysis}
+              conceptData={answerMeta?.concept_data}
+              onFocusEvidence={focusEvidence}
+              viewMode={chatViewMode}
+              setViewMode={setChatViewMode}
             />
-            <ChatErrorBoundary fallbackText={answer}>
-              <ForensicConsoleAnswer
-                answer={answer}
-                generator={generator}
-                inv={inv}
-                intent={answerMeta?.intent}
-                renderType={answerMeta?.render_type}
-                forensicState={answerMeta?.forensic_state}
-                generatedAnalysis={answerMeta?.generated_analysis}
-                conceptData={answerMeta?.concept_data}
-                onFocusEvidence={focusEvidence}
-                viewMode={chatViewMode}
-                setViewMode={setChatViewMode}
-              />
-            </ChatErrorBoundary>
-          </Box>
+          </ChatErrorBoundary>
         ) : (
           /* Empty / Ready State */
           <Box sx={{ p: 3, textAlign: "center", border: "1px dashed rgba(61, 255, 174, 0.15)", borderRadius: "12px", bgcolor: "#050f0b", my: "auto" }}>
@@ -311,7 +315,7 @@ export default function LocalAiCopilot({
         )}
       </Box>
 
-      {/* 3. CONTEXT-AWARE SUGGESTIONS STRIP (3 Contextual Chips + Expandable "More") */}
+      {/* 3. DYNAMIC CONTEXT-AWARE SUGGESTIONS STRIP */}
       <Box
         className="ai-suggestions"
         sx={{
@@ -367,7 +371,7 @@ export default function LocalAiCopilot({
               fontWeight: 700,
             }}
           >
-            {showMoreSuggestions ? "Less" : "More prompts"}
+            {showMoreSuggestions ? "Less" : "More"}
           </Button>
         </Stack>
 
@@ -398,7 +402,7 @@ export default function LocalAiCopilot({
         </Collapse>
       </Box>
 
-      {/* 4. PINNED BOTTOM CHAT INPUT BAR WITH 2-TIER WORKSTATION LAYOUT */}
+      {/* 4. PINNED BOTTOM CHAT INPUT BAR (Clean modern context chip + 2-tier input) */}
       <Box
         className="ai-input-container"
         sx={{
@@ -408,36 +412,27 @@ export default function LocalAiCopilot({
           borderTop: "1px solid rgba(61, 255, 174, 0.12)",
         }}
       >
-        {/* Context Toggles Row */}
-        <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 0.8, px: 0.2 }}>
-          <Stack
-            direction="row"
-            spacing={0.4}
-            alignItems="center"
-            onClick={() => setUseCaseEvidence((p) => !p)}
-            sx={{ cursor: "pointer", userSelect: "none" }}
-          >
-            {useCaseEvidence ? <CheckBoxIcon sx={{ fontSize: 14, color: "#3dffae" }} /> : <CheckBoxOutlineBlankIcon sx={{ fontSize: 14, color: "#52685e" }} />}
-            <Typography variant="caption" sx={{ fontSize: 10, fontWeight: 700, color: useCaseEvidence ? "#3dffae" : "#8fa89d" }}>
-              Case Evidence
-            </Typography>
-          </Stack>
-
-          {selectedEvent && (
-            <Stack
-              direction="row"
-              spacing={0.4}
-              alignItems="center"
-              onClick={() => setUseSelectedEvent((p) => !p)}
-              sx={{ cursor: "pointer", userSelect: "none" }}
-            >
-              {useSelectedEvent ? <CheckBoxIcon sx={{ fontSize: 14, color: "#3dffae" }} /> : <CheckBoxOutlineBlankIcon sx={{ fontSize: 14, color: "#52685e" }} />}
-              <Typography variant="caption" sx={{ fontSize: 10, fontWeight: 700, color: useSelectedEvent ? "#3dffae" : "#8fa89d" }}>
-                Selected Event (#{selectedEvent.id})
-              </Typography>
-            </Stack>
-          )}
-        </Stack>
+        {/* Active Context Chip if Event is Selected */}
+        {selectedEvent && (
+          <Box sx={{ mb: 0.8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <Chip
+              size="small"
+              icon={<AutoFixHighIcon sx={{ fontSize: "12px !important", color: "#3dffae" }} />}
+              label={`Scoped to Event #${selectedEvent.id}: ${selectedEvent.event_type}`}
+              onDelete={() => setSelectedEvent && setSelectedEvent(null)}
+              deleteIcon={<CloseIcon sx={{ fontSize: "13px !important", color: "#3dffae" }} />}
+              sx={{
+                height: 22,
+                fontSize: 10,
+                fontWeight: 700,
+                fontFamily: "JetBrains Mono, monospace",
+                bgcolor: "rgba(61, 255, 174, 0.12)",
+                color: "#3dffae",
+                border: "1px solid rgba(61, 255, 174, 0.3)",
+              }}
+            />
+          </Box>
+        )}
 
         {/* Input Field Box */}
         <Box
@@ -458,7 +453,11 @@ export default function LocalAiCopilot({
           <TextField
             fullWidth
             variant="standard"
-            placeholder={`Ask about ${caseNumber || "this investigation"}...`}
+            placeholder={
+              selectedEvent
+                ? `Ask about Event #${selectedEvent.id} (e.g. is this exfiltration)...`
+                : `Ask about ${caseNumber || "this investigation"}...`
+            }
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
@@ -501,12 +500,40 @@ export default function LocalAiCopilot({
           </Button>
         </Box>
 
-        <Stack direction="row" justifyContent="space-between" sx={{ mt: 0.6, px: 0.5 }}>
+        {/* Context Toggles Row */}
+        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 0.6, px: 0.5 }}>
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <Stack
+              direction="row"
+              spacing={0.4}
+              alignItems="center"
+              onClick={() => setUseCaseEvidence((p) => !p)}
+              sx={{ cursor: "pointer", userSelect: "none" }}
+            >
+              {useCaseEvidence ? <CheckBoxIcon sx={{ fontSize: 13, color: "#3dffae" }} /> : <CheckBoxOutlineBlankIcon sx={{ fontSize: 13, color: "#52685e" }} />}
+              <Typography variant="caption" sx={{ fontSize: 9.5, fontWeight: 700, color: useCaseEvidence ? "#3dffae" : "#8fa89d" }}>
+                Case Evidence
+              </Typography>
+            </Stack>
+
+            {selectedEvent && (
+              <Stack
+                direction="row"
+                spacing={0.4}
+                alignItems="center"
+                onClick={() => setUseSelectedEvent((p) => !p)}
+                sx={{ cursor: "pointer", userSelect: "none" }}
+              >
+                {useSelectedEvent ? <CheckBoxIcon sx={{ fontSize: 13, color: "#3dffae" }} /> : <CheckBoxOutlineBlankIcon sx={{ fontSize: 13, color: "#52685e" }} />}
+                <Typography variant="caption" sx={{ fontSize: 9.5, fontWeight: 700, color: useSelectedEvent ? "#3dffae" : "#8fa89d" }}>
+                  Event #{selectedEvent.id}
+                </Typography>
+              </Stack>
+            )}
+          </Stack>
+
           <Typography variant="caption" sx={{ color: "#52685e", fontSize: 9.5 }}>
-            Press <b>Enter</b> to analyze • <b>Shift+Enter</b> for new line
-          </Typography>
-          <Typography variant="caption" sx={{ color: "#52685e", fontSize: 9.5, fontFamily: "JetBrains Mono" }}>
-            Ollama · llama3.2:3b
+            Enter ↵ to analyze
           </Typography>
         </Stack>
       </Box>

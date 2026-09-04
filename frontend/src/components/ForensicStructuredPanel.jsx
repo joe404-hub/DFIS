@@ -79,11 +79,11 @@ export default function ForensicStructuredPanel({
   };
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.2 }}>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.4 }}>
       {/* 1. Primary Assessment / Verdict Card */}
       <Paper
         sx={{
-          p: 1.5,
+          p: 1.8,
           bgcolor:
             assessmentState === "OBSERVED"
               ? "#081c13"
@@ -94,7 +94,7 @@ export default function ForensicStructuredPanel({
             assessmentState === "OBSERVED"
               ? "1px solid #3dffae"
               : assessmentState === "NOT ESTABLISHED"
-              ? "1px solid rgba(61, 255, 174, 0.15)"
+              ? "1px solid rgba(61, 255, 174, 0.18)"
               : "1px solid #f6b84a",
           borderRadius: "10px",
         }}
@@ -102,21 +102,21 @@ export default function ForensicStructuredPanel({
         <Typography variant="overline" sx={{ color: "#52685e", fontWeight: 800, letterSpacing: "0.1em", fontSize: 9.5 }}>
           FORENSIC ASSESSMENT
         </Typography>
-        <Box sx={{ my: 0.4 }}>
+        <Box sx={{ my: 0.5 }}>
           <EvidenceStatusBadge status={assessmentState} />
         </Box>
-        <Typography variant="body2" sx={{ color: "#eefaf4", fontSize: 12.5, lineHeight: 1.6, fontWeight: 500 }}>
+        <Typography variant="body2" sx={{ color: "#eefaf4", fontSize: 13, lineHeight: 1.65, fontWeight: 500, maxWidth: "65ch" }}>
           {assessmentText}
         </Typography>
       </Paper>
 
       {/* 2. OBSERVED CASE EVIDENCE */}
       {observedItems.length > 0 && (
-        <Box sx={{ borderBottom: "1px solid rgba(61, 255, 174, 0.1)", pb: 1.2, mb: 0.5 }}>
-          <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#3dffae", fontSize: 10.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.6, mb: 0.8 }}>
+        <Paper sx={{ p: 1.6, bgcolor: "#050f0b", border: "1px solid rgba(61, 255, 174, 0.12)", borderRadius: "10px" }}>
+          <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#3dffae", fontSize: 11, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.6, mb: 1 }}>
             <CheckCircleOutlineIcon sx={{ fontSize: 14 }} /> Observed Case Evidence ({observedItems.length})
           </Typography>
-          <Stack spacing={0.6}>
+          <Stack spacing={0.8}>
             {observedItems.map((item, idx) => {
               const itemTitle = typeof item.title === "string" ? item.title : String(item.title || "");
               const itemDesc = typeof item.description === "string" ? item.description : (typeof item.desc === "string" ? item.desc : "");
@@ -125,7 +125,7 @@ export default function ForensicStructuredPanel({
               const artifactsList = Array.isArray(item.artifacts) ? item.artifacts : [];
 
               return (
-                <Box key={idx} sx={{ p: 1, bgcolor: "#050f0b", borderLeft: "3px solid #3dffae", borderRadius: "0 6px 6px 0" }}>
+                <Box key={idx} sx={{ p: 1.2, bgcolor: "#08140f", borderLeft: "3px solid #3dffae", borderRadius: "0 6px 6px 0" }}>
                   <Typography variant="subtitle2" sx={{ color: "#eefaf4", fontSize: 12, fontWeight: 700 }}>
                     {itemTitle}
                   </Typography>
@@ -136,7 +136,7 @@ export default function ForensicStructuredPanel({
                   )}
 
                   {/* Clickable Evidence Token Chips */}
-                  <Stack direction="row" spacing={0.8} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.6 }}>
+                  <Stack direction="row" spacing={0.8} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.8 }}>
                     {evIds.length > 0 && (
                       <Stack direction="row" spacing={0.4} alignItems="center">
                         <Typography variant="caption" sx={{ fontSize: 9, color: "#52685e", fontWeight: 700, textTransform: "uppercase" }}>
@@ -154,14 +154,14 @@ export default function ForensicStructuredPanel({
                             title={`Click to focus Artifact #${id} in Timeline`}
                             sx={{
                               cursor: "pointer",
-                              border: "1px solid rgba(61, 255, 174, 0.25)",
-                              bgcolor: "rgba(61, 255, 174, 0.08)",
+                              border: "1px solid rgba(61, 255, 174, 0.3)",
+                              bgcolor: "rgba(61, 255, 174, 0.1)",
                               color: "#3dffae",
                               fontFamily: "JetBrains Mono, monospace",
                               fontSize: 10,
-                              fontWeight: 700,
-                              px: 0.6,
-                              py: 0.1,
+                              fontWeight: 800,
+                              px: 0.7,
+                              py: 0.15,
                               borderRadius: "4px",
                               display: "inline-flex",
                               alignItems: "center",
@@ -189,7 +189,7 @@ export default function ForensicStructuredPanel({
                             size="small"
                             label={eid}
                             sx={{
-                              height: 16,
+                              height: 18,
                               fontSize: 9.5,
                               fontWeight: 700,
                               fontFamily: "JetBrains Mono, monospace",
@@ -213,7 +213,7 @@ export default function ForensicStructuredPanel({
                             size="small"
                             label={art}
                             sx={{
-                              height: 16,
+                              height: 18,
                               fontSize: 9.5,
                               fontWeight: 700,
                               fontFamily: "JetBrains Mono, monospace",
@@ -230,23 +230,23 @@ export default function ForensicStructuredPanel({
               );
             })}
           </Stack>
-        </Box>
+        </Paper>
       )}
 
       {/* 3. NOT ESTABLISHED FINDINGS */}
       {notEstablishedItems.length > 0 && (
-        <Box sx={{ borderBottom: "1px solid rgba(61, 255, 174, 0.1)", pb: 1.2, mb: 0.5 }}>
-          <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#8fa89d", fontSize: 10.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.6, mb: 0.8 }}>
+        <Paper sx={{ p: 1.6, bgcolor: "#050f0b", border: "1px solid rgba(61, 255, 174, 0.12)", borderRadius: "10px" }}>
+          <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#8fa89d", fontSize: 11, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.6, mb: 1 }}>
             <span style={{ fontSize: "12px", lineHeight: 1 }}>○</span> Not Established / Unproven Findings ({notEstablishedItems.length})
           </Typography>
-          <Stack spacing={0.6}>
+          <Stack spacing={0.8}>
             {notEstablishedItems.map((item, idx) => {
               const itemTitle = typeof item.title === "string" ? item.title : String(item.title || "");
               const itemDesc = typeof item.description === "string" ? item.description : (typeof item.desc === "string" ? item.desc : "");
               const itemStatus = typeof item.status === "string" ? item.status.replace(/_/g, " ") : "NOT ESTABLISHED";
 
               return (
-                <Box key={idx} sx={{ p: 1, bgcolor: "#050f0b", borderLeft: "3px solid #2a3f35", borderRadius: "0 6px 6px 0" }}>
+                <Box key={idx} sx={{ p: 1.2, bgcolor: "#08140f", borderLeft: "3px solid #2a3f35", borderRadius: "0 6px 6px 0" }}>
                   <Stack direction="row" justifyContent="space-between" alignItems="center">
                     <Typography variant="subtitle2" sx={{ color: "#8fa89d", fontSize: 12, fontWeight: 700 }}>
                       {itemTitle}
@@ -254,11 +254,11 @@ export default function ForensicStructuredPanel({
                     <Chip
                       size="small"
                       label={itemStatus}
-                      sx={{ height: 16, fontSize: 8.5, fontWeight: 800, bgcolor: "#08140f", color: "#8fa89d", border: "1px solid rgba(61, 255, 174, 0.1)" }}
+                      sx={{ height: 16, fontSize: 8.5, fontWeight: 800, bgcolor: "#050f0b", color: "#8fa89d", border: "1px solid rgba(61, 255, 174, 0.1)" }}
                     />
                   </Stack>
                   {itemDesc && (
-                    <Typography variant="body2" sx={{ color: "#52685e", fontSize: 11.5, mt: 0.2 }}>
+                    <Typography variant="body2" sx={{ color: "#52685e", fontSize: 11.5, mt: 0.3 }}>
                       {itemDesc}
                     </Typography>
                   )}
@@ -266,16 +266,16 @@ export default function ForensicStructuredPanel({
               );
             })}
           </Stack>
-        </Box>
+        </Paper>
       )}
 
       {/* 4. INVESTIGATIVE HYPOTHESES */}
       {hypothesisItems.length > 0 && (
-        <Box sx={{ borderBottom: "1px solid rgba(61, 255, 174, 0.1)", pb: 1.2, mb: 0.5 }}>
-          <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#f6b84a", fontSize: 10.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.6, mb: 0.8 }}>
+        <Paper sx={{ p: 1.6, bgcolor: "#050f0b", border: "1px solid rgba(61, 255, 174, 0.12)", borderRadius: "10px" }}>
+          <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#f6b84a", fontSize: 11, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.6, mb: 1 }}>
             <span style={{ fontSize: "12px", lineHeight: 1 }}>◐</span> Investigative Hypotheses ({hypothesisItems.length})
           </Typography>
-          <Stack spacing={0.6}>
+          <Stack spacing={0.8}>
             {hypothesisItems.map((item, idx) => {
               const itemTitle = typeof item.title === "string" ? item.title : String(item.title || "");
               const itemDesc = typeof item.description === "string" ? item.description : (typeof item.desc === "string" ? item.desc : "");
@@ -283,7 +283,7 @@ export default function ForensicStructuredPanel({
               const evIds = Array.isArray(item.evidence_ids) ? item.evidence_ids : [];
 
               return (
-                <Box key={idx} sx={{ p: 1, bgcolor: "#0f170c", borderLeft: "3px solid #f6b84a", borderRadius: "0 6px 6px 0" }}>
+                <Box key={idx} sx={{ p: 1.2, bgcolor: "#0f170c", borderLeft: "3px solid #f6b84a", borderRadius: "0 6px 6px 0" }}>
                   <Stack direction="row" justifyContent="space-between" alignItems="center">
                     <Typography variant="subtitle2" sx={{ color: "#fde68a", fontSize: 12, fontWeight: 700 }}>
                       {itemTitle}
@@ -295,12 +295,12 @@ export default function ForensicStructuredPanel({
                     />
                   </Stack>
                   {itemDesc && (
-                    <Typography variant="body2" sx={{ color: "#f6b84a", fontSize: 11.5, mt: 0.2 }}>
+                    <Typography variant="body2" sx={{ color: "#f6b84a", fontSize: 11.5, mt: 0.3 }}>
                       {itemDesc}
                     </Typography>
                   )}
                   {evIds.length > 0 && (
-                    <Stack direction="row" spacing={0.4} alignItems="center" sx={{ mt: 0.5 }}>
+                    <Stack direction="row" spacing={0.4} alignItems="center" sx={{ mt: 0.6 }}>
                       <Typography variant="caption" sx={{ fontSize: 9, color: "#52685e", fontWeight: 700, textTransform: "uppercase" }}>
                         Evidence
                       </Typography>
@@ -343,23 +343,23 @@ export default function ForensicStructuredPanel({
               );
             })}
           </Stack>
-        </Box>
+        </Paper>
       )}
 
       {/* 5. EVIDENCE GAPS */}
       {gapItems.length > 0 && (
-        <Box sx={{ borderBottom: "1px solid rgba(61, 255, 174, 0.1)", pb: 1.2, mb: 0.5 }}>
-          <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#f6b84a", fontSize: 10.5, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.6, mb: 0.8 }}>
+        <Paper sx={{ p: 1.6, bgcolor: "#050f0b", border: "1px solid rgba(61, 255, 174, 0.12)", borderRadius: "10px" }}>
+          <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: "0.06em", color: "#f6b84a", fontSize: 11, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 0.6, mb: 1 }}>
             <WarningAmberIcon sx={{ fontSize: 14 }} /> Evidence Gaps & Missing Proofs ({gapItems.length})
           </Typography>
-          <Stack spacing={0.6}>
+          <Stack spacing={0.8}>
             {gapItems.map((item, idx) => {
               const itemTitle = typeof item.title === "string" ? item.title : String(item.title || "");
               const itemDesc = typeof item.description === "string" ? item.description : (typeof item.desc === "string" ? item.desc : "");
               const itemSeverity = typeof item.severity === "string" ? item.severity : "Correlation Required";
 
               return (
-                <Box key={idx} sx={{ p: 1, bgcolor: "#0f170c", borderLeft: "3px solid #b45309", borderRadius: "0 6px 6px 0" }}>
+                <Box key={idx} sx={{ p: 1.2, bgcolor: "#0f170c", borderLeft: "3px solid #b45309", borderRadius: "0 6px 6px 0" }}>
                   <Stack direction="row" justifyContent="space-between" alignItems="center">
                     <Typography variant="subtitle2" sx={{ color: "#fde68a", fontSize: 12, fontWeight: 700 }}>
                       {itemTitle}
@@ -371,7 +371,7 @@ export default function ForensicStructuredPanel({
                     />
                   </Stack>
                   {itemDesc && itemDesc !== itemTitle && (
-                    <Typography variant="body2" sx={{ color: "#f6b84a", fontSize: 11.5, mt: 0.2 }}>
+                    <Typography variant="body2" sx={{ color: "#f6b84a", fontSize: 11.5, mt: 0.3 }}>
                       {itemDesc}
                     </Typography>
                   )}
@@ -379,63 +379,61 @@ export default function ForensicStructuredPanel({
               );
             })}
           </Stack>
-        </Box>
+        </Paper>
       )}
 
       {/* 6. INVESTIGATIVE INTERPRETATION & ATT&CK ANALYSIS */}
       {interpretationData && (
-        <Box sx={{ borderBottom: "1px solid rgba(61, 255, 174, 0.1)", pb: 1.2, mb: 0.5 }}>
+        <Paper sx={{ p: 1.6, bgcolor: "#050f0b", border: "1px solid rgba(61, 255, 174, 0.18)", borderRadius: "10px" }}>
           <Typography variant="caption" sx={{ color: "#3dffae", fontWeight: 800, fontSize: 10.5, textTransform: "uppercase", display: "block", mb: 0.8 }}>
             Investigative Interpretation & ATT&CK Analysis
           </Typography>
-          <Paper sx={{ p: 1.5, bgcolor: "#050f0b", border: "1px solid rgba(61, 255, 174, 0.18)", borderRadius: "10px" }}>
-            <Stack spacing={0.8}>
-              <Box sx={{ p: 1, bgcolor: "#08140f", border: "1px solid rgba(61, 255, 174, 0.12)", borderRadius: "6px" }}>
-                <Typography variant="caption" sx={{ color: "#52685e", fontWeight: 800, textTransform: "uppercase", fontSize: 9, display: "block" }}>
-                  ATT&CK HYPOTHESIS
+          <Stack spacing={0.8}>
+            <Box sx={{ p: 1, bgcolor: "#08140f", border: "1px solid rgba(61, 255, 174, 0.12)", borderRadius: "6px" }}>
+              <Typography variant="caption" sx={{ color: "#52685e", fontWeight: 800, textTransform: "uppercase", fontSize: 9, display: "block" }}>
+                ATT&CK HYPOTHESIS
+              </Typography>
+              <Typography variant="subtitle2" sx={{ color: "#3dffae", fontWeight: 700, fontSize: 12, my: 0.3 }}>
+                {interpretationData.attck_hypothesis || "T1567 · Exfiltration Over Web Service"}
+              </Typography>
+              <Stack direction="row" spacing={0.8} sx={{ mt: 0.4 }}>
+                <Chip size="small" label={`Status: ${interpretationData.attck_status || "Hypothesis"}`} sx={{ bgcolor: "#0d1e16", color: "#fde68a", border: "1px solid rgba(246, 184, 74, 0.3)", fontWeight: 700, fontSize: 9, height: 18 }} />
+                <Chip size="small" label={`Confidence: ${interpretationData.attck_confidence || "Medium"}`} sx={{ bgcolor: "rgba(61, 255, 174, 0.08)", color: "#3dffae", border: "1px solid rgba(61, 255, 174, 0.25)", fontWeight: 700, fontSize: 9, height: 18 }} />
+              </Stack>
+            </Box>
+
+            {interpretationData.interpretation && (
+              <Box sx={{ p: 1, bgcolor: "#08140f", border: "1px solid rgba(61, 255, 174, 0.08)", borderRadius: "6px" }}>
+                <Typography variant="caption" sx={{ color: "#52685e", fontWeight: 800, textTransform: "uppercase", fontSize: 9, display: "block", mb: 0.3 }}>
+                  ASSESSMENT
                 </Typography>
-                <Typography variant="subtitle2" sx={{ color: "#3dffae", fontWeight: 700, fontSize: 12, my: 0.3 }}>
-                  {interpretationData.attck_hypothesis || "T1567 · Exfiltration Over Web Service"}
+                <Typography variant="body2" sx={{ color: "#eefaf4", fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+                  {interpretationData.interpretation}
                 </Typography>
-                <Stack direction="row" spacing={0.8} sx={{ mt: 0.4 }}>
-                  <Chip size="small" label={`Status: ${interpretationData.attck_status || "Hypothesis"}`} sx={{ bgcolor: "#0d1e16", color: "#fde68a", border: "1px solid rgba(246, 184, 74, 0.3)", fontWeight: 700, fontSize: 9, height: 18 }} />
-                  <Chip size="small" label={`Confidence: ${interpretationData.attck_confidence || "Medium"}`} sx={{ bgcolor: "rgba(61, 255, 174, 0.08)", color: "#3dffae", border: "1px solid rgba(61, 255, 174, 0.25)", fontWeight: 700, fontSize: 9, height: 18 }} />
+              </Box>
+            )}
+
+            {Array.isArray(interpretationData.verification_steps) && interpretationData.verification_steps.length > 0 && (
+              <Box sx={{ mt: 0.5 }}>
+                <Typography variant="caption" sx={{ color: "#3dffae", fontWeight: 800, display: "block", mb: 0.5, textTransform: "uppercase", fontSize: 9.5 }}>
+                  EXAMINER VERIFICATION CHECKLIST:
+                </Typography>
+                <Stack spacing={0.5}>
+                  {interpretationData.verification_steps.map((step, idx) => {
+                    const stepStr = typeof step === "string" ? step : (step?.action || step?.text || String(step || ""));
+                    return (
+                      <Paper key={idx} sx={{ p: 0.6, px: 1, bgcolor: "#08140f", border: "1px solid rgba(61, 255, 174, 0.1)", borderRadius: "4px" }}>
+                        <Typography variant="body2" sx={{ color: "#8fa89d", fontSize: 11.5, lineHeight: 1.35 }}>
+                          {stepStr}
+                        </Typography>
+                      </Paper>
+                    );
+                  })}
                 </Stack>
               </Box>
-
-              {interpretationData.interpretation && (
-                <Box sx={{ p: 1, bgcolor: "#08140f", border: "1px solid rgba(61, 255, 174, 0.08)", borderRadius: "6px" }}>
-                  <Typography variant="caption" sx={{ color: "#52685e", fontWeight: 800, textTransform: "uppercase", fontSize: 9, display: "block", mb: 0.3 }}>
-                    ASSESSMENT
-                  </Typography>
-                  <Typography variant="body2" sx={{ color: "#eefaf4", fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
-                    {interpretationData.interpretation}
-                  </Typography>
-                </Box>
-              )}
-
-              {Array.isArray(interpretationData.verification_steps) && interpretationData.verification_steps.length > 0 && (
-                <Box sx={{ mt: 0.5 }}>
-                  <Typography variant="caption" sx={{ color: "#3dffae", fontWeight: 800, display: "block", mb: 0.5, textTransform: "uppercase", fontSize: 9.5 }}>
-                    EXAMINER VERIFICATION CHECKLIST:
-                  </Typography>
-                  <Stack spacing={0.5}>
-                    {interpretationData.verification_steps.map((step, idx) => {
-                      const stepStr = typeof step === "string" ? step : (step?.action || step?.text || String(step || ""));
-                      return (
-                        <Paper key={idx} sx={{ p: 0.6, px: 1, bgcolor: "#08140f", border: "1px solid rgba(61, 255, 174, 0.1)", borderRadius: "4px" }}>
-                          <Typography variant="body2" sx={{ color: "#8fa89d", fontSize: 11.5, lineHeight: 1.35 }}>
-                            {stepStr}
-                          </Typography>
-                        </Paper>
-                      );
-                    })}
-                  </Stack>
-                </Box>
-              )}
-            </Stack>
-          </Paper>
-        </Box>
+            )}
+          </Stack>
+        </Paper>
       )}
 
       {/* 7. Sticky Conclusion Summary Banner at Bottom */}
@@ -444,7 +442,7 @@ export default function ForensicStructuredPanel({
           position: "sticky",
           bottom: -10,
           mt: 1,
-          p: 1.2,
+          p: 1.4,
           bgcolor: "#050f0b",
           borderTop: "2px solid #3dffae",
           borderRadius: "0 0 10px 10px",
