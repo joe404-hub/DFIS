@@ -34,11 +34,15 @@ import SmartToyIcon from "@mui/icons-material/SmartToy";
 import SettingsIcon from "@mui/icons-material/Settings";
 import ViewSidebarIcon from "@mui/icons-material/ViewSidebar";
 import HistoryIcon from "@mui/icons-material/History";
+import HomeIcon from "@mui/icons-material/Home";
 import { DataSet } from "vis-data";
 import { Timeline } from "vis-timeline";
 import { Network } from "vis-network";
 import "vis-timeline/styles/vis-timeline-graph2d.css";
 
+import Home from "./Home.jsx";
+import SignInView from "./auth/SignInView.jsx";
+import SignUpView from "./auth/SignUpView.jsx";
 import Sidebar from "./components/Sidebar.jsx";
 import TimelineWorkspace from "./components/TimelineWorkspace.jsx";
 import LocalAiCopilot from "./components/LocalAiCopilot.jsx";
@@ -94,6 +98,9 @@ async function queryLocalOllamaFromBrowser(baseUrl, model, messages, temperature
 
 export default function App() {
   const { currentUser, can, addAuditLog, loginModalOpen, setLoginModalOpen, auditModalOpen, setAuditModalOpen } = useAuth();
+
+  // Navigation state: "landing" | "signin" | "signup" | "workspace"
+  const [currentView, setCurrentView] = useState("landing");
 
   const [cases, setCases] = useState([]);
   const [active, setActive] = useState(null);
@@ -293,7 +300,7 @@ export default function App() {
 
   // Vis Timeline initialization with Black & Emerald theme & Structured Lane Headers
   useEffect(() => {
-    if (!tlRef.current || tab !== 0) return;
+    if (!tlRef.current || tab !== 0 || currentView !== "workspace") return;
     try {
       const filtered = (timeline || []).filter((e) => e && e.timestamp);
       if (!filtered.length) return;
@@ -356,11 +363,11 @@ export default function App() {
     } catch (err) {
       console.warn("Timeline init error:", err);
     }
-  }, [timeline, tab]);
+  }, [timeline, tab, currentView]);
 
   // Vis Network Graph initialization
   useEffect(() => {
-    if (!netRef.current || tab !== 1) return;
+    if (!netRef.current || tab !== 1 || currentView !== "workspace") return;
     try {
       if (netInst.current) {
         try { netInst.current.destroy(); } catch {}
@@ -377,7 +384,7 @@ export default function App() {
     } catch (err) {
       console.warn("Network init error:", err);
     }
-  }, [graph, tab]);
+  }, [graph, tab, currentView]);
 
   const finding = detail?.findings?.[0];
 
@@ -600,6 +607,19 @@ export default function App() {
 
   const risk = inv?.risk_score || finding?.risk_score || 0;
 
+  // VIEW ROUTING
+  if (currentView === "landing") {
+    return <Home onNavigate={setCurrentView} />;
+  }
+
+  if (currentView === "signin") {
+    return <SignInView onNavigate={setCurrentView} />;
+  }
+
+  if (currentView === "signup") {
+    return <SignUpView onNavigate={setCurrentView} />;
+  }
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", height: "100vh", bgcolor: "#020806", color: "#eefaf4", overflow: "hidden", position: "relative" }}>
       <style>{`
@@ -734,6 +754,7 @@ export default function App() {
             </Tooltip>
 
             <Box
+              onClick={() => setCurrentView("landing")}
               sx={{
                 width: 28,
                 height: 28,
@@ -743,11 +764,20 @@ export default function App() {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
+                cursor: "pointer",
+                transition: "all 0.15s ease",
+                "&:hover": { borderColor: "#3dffae", boxShadow: "0 0 12px rgba(61, 255, 174, 0.4)" },
               }}
             >
               <FingerprintIcon sx={{ color: "#3dffae", fontSize: 17 }} />
             </Box>
-            <Stack direction="row" spacing={0.6} alignItems="center">
+            <Stack
+              direction="row"
+              spacing={0.6}
+              alignItems="center"
+              onClick={() => setCurrentView("landing")}
+              sx={{ cursor: "pointer" }}
+            >
               <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: "-0.02em", color: "#eefaf4", fontSize: 15 }}>
                 DFIS
               </Typography>
@@ -800,8 +830,19 @@ export default function App() {
 
           {/* User Persona Profile & Actions */}
           <Stack direction="row" spacing={1} alignItems="center">
+            {/* Quick Home Navigation Button */}
+            <Tooltip title="Return to DFIS Landing Page" arrow>
+              <IconButton
+                size="small"
+                onClick={() => setCurrentView("landing")}
+                sx={{ color: "#8fa89d", border: "1px solid rgba(61, 255, 174, 0.12)", bgcolor: "#08140f", height: 28, width: 28, "&:hover": { color: "#3dffae", borderColor: "#3dffae" } }}
+              >
+                <HomeIcon sx={{ fontSize: 15 }} />
+              </IconButton>
+            </Tooltip>
+
             {/* User Profile & RBAC Switcher */}
-            <UserProfileMenu />
+            <UserProfileMenu onNavigateHome={() => setCurrentView("landing")} />
 
             <Chip
               icon={<SmartToyIcon sx={{ fontSize: "13px !important", color: llmStatus?.connected ? "#3dffae" : "#f6b84a" }} />}

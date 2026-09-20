@@ -9,7 +9,6 @@ import {
   ListItemText,
   Menu,
   MenuItem,
-  Paper,
   Stack,
   Typography,
 } from "@mui/material";
@@ -17,11 +16,11 @@ import PersonIcon from "@mui/icons-material/Person";
 import SecurityIcon from "@mui/icons-material/Security";
 import LockIcon from "@mui/icons-material/Lock";
 import LogoutIcon from "@mui/icons-material/Logout";
-import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import HomeIcon from "@mui/icons-material/Home";
 import { useAuth } from "./AuthContext.jsx";
 
-export default function UserProfileMenu() {
+export default function UserProfileMenu({ onNavigateHome }) {
   const { currentUser, switchUser, presetUsers, setLoginModalOpen, setAuditModalOpen, logout } = useAuth();
   const [anchorEl, setAnchorEl] = useState(null);
   const open = Boolean(anchorEl);
@@ -101,7 +100,7 @@ export default function UserProfileMenu() {
         onClose={handleClose}
         PaperProps={{
           sx: {
-            width: 280,
+            width: 290,
             bgcolor: "#08140f",
             border: "1px solid rgba(61, 255, 174, 0.2)",
             borderRadius: "12px",
@@ -194,6 +193,19 @@ export default function UserProfileMenu() {
 
         <MenuItem
           onClick={() => {
+            if (onNavigateHome) onNavigateHome();
+            handleClose();
+          }}
+          sx={{ py: 0.6, px: 1, borderRadius: "6px", "&:hover": { bgcolor: "#0d1e16" } }}
+        >
+          <ListItemIcon sx={{ minWidth: 24, color: "#8fa89d" }}>
+            <HomeIcon sx={{ fontSize: 15 }} />
+          </ListItemIcon>
+          <ListItemText primary="DFIS Landing Page" primaryTypographyProps={{ fontSize: 11.5, color: "#8fa89d" }} />
+        </MenuItem>
+
+        <MenuItem
+          onClick={() => {
             setLoginModalOpen(true);
             handleClose();
           }}
@@ -208,6 +220,7 @@ export default function UserProfileMenu() {
         <MenuItem
           onClick={() => {
             logout();
+            if (onNavigateHome) onNavigateHome();
             handleClose();
           }}
           sx={{ py: 0.6, px: 1, borderRadius: "6px", color: "#ff6565", "&:hover": { bgcolor: "rgba(255, 101, 101, 0.1)" } }}
