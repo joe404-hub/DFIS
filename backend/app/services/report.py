@@ -33,25 +33,40 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
     story.append(_table(rows))
 
     story.append(Spacer(1, 10))
-    story.append(Paragraph("2. Incident classification", styles["Heading2"]))
+    story.append(Paragraph("2. Incident classification & Evidentiary States", styles["Heading2"]))
+    
+    from app.services.investigation import format_classification_label
+    formatted_label = format_classification_label(analysis.get("category"), analysis.get("secondary"))
+
     story.append(
         Paragraph(
-            f"Hypothesis: <b>Possible {analysis.get('category')}</b> / {analysis.get('secondary') or ''} "
-            f"&nbsp; Risk Priority: {analysis.get('risk_score')}/100 — "
+            f"Working Classification: <b>{formatted_label}</b> "
+            f"&nbsp; Investigation Priority: {analysis.get('risk_score')}/100 — "
             f"{(analysis.get('risk') or {}).get('priority') or analysis.get('priority') or 'PRIORITY'} "
-            f"(not a probability of crime)",
+            f"(prioritization aid, not legal culpability)",
             styles["BodyText"],
         )
     )
     story.append(
         Paragraph(
-            "Malicious intent cannot be established from these events alone.",
+            "Malicious intent and unauthorized access cannot be established from logs alone.",
             styles["Italic"],
         )
     )
 
+    # 4-Tier Evidentiary States Table
+    ev_states = analysis.get("evidentiary_states") or []
+    if ev_states:
+        story.append(Spacer(1, 6))
+        story.append(Paragraph("<b>Forensic Evidentiary State Breakdown</b>", styles["Heading3"]))
+        srows = [["Investigation Finding", "Evidentiary State", "Forensic Detail"]]
+        for s in ev_states:
+            srows.append([s.get("finding", ""), s.get("state", ""), s.get("detail", "")[:75]])
+        story.append(_table(srows))
+
     risk = analysis.get("risk") or {}
     if risk.get("indicators"):
+        story.append(Spacer(1, 8))
         story.append(Paragraph("3. Transparent risk indicators (prototype weights)", styles["Heading2"]))
         story.append(Paragraph(risk.get("disclaimer") or "", styles["Italic"]))
         rrows = [["Fired", "Points", "Indicator"]]
@@ -62,13 +77,13 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
         story.append(_table(rrows))
 
     story.append(Spacer(1, 8))
-    story.append(Paragraph("4. Attack-chain hypothesis (ATT&amp;CK not factual)", styles["Heading2"]))
+    story.append(Paragraph("4. Reconstructed Attack Chain Hypothesis (ATT&amp;CK not factual)", styles["Heading2"]))
     crows = [["Time", "Activity", "Technique", "Status", "Conf.", "Evidence IDs"]]
     for s in analysis.get("attack_chain") or []:
         crows.append(
             [
                 str(s.get("time") or "")[:19],
-                (s.get("title") or "")[:40],
+                (s.get("title") or "")[:35],
                 s.get("mitre") or "—",
                 s.get("status") or "hypothesized",
                 s.get("confidence") or "",
@@ -80,6 +95,7 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
 
     story.append(Spacer(1, 8))
     story.append(Paragraph("5. Correlated activities → supporting event IDs", styles["Heading2"]))
+    story.append(Paragraph("Correlation links are analytical relationships, not evidence artifacts.", styles["Italic"]))
     grows = [["Time", "Type", "Entity", "Link", "Evidence IDs"]]
     for g in analysis.get("correlations") or []:
         grows.append(
@@ -94,6 +110,25 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
     if len(grows) > 1:
         story.append(_table(grows))
 
+    # 5c. Evidence Acquisition / Observations
+    obs = analysis.get("observations") or []
+    if obs:
+        story.append(Spacer(1, 8))
+        story.append(Paragraph("5c. Evidence Acquisition / Observations", styles["Heading2"]))
+        orows = [["Time", "Observation", "Type", "Status", "Evidence IDs", "Forensic Note"]]
+        for o in obs:
+            orows.append(
+                [
+                    str(o.get("time") or "")[:19],
+                    o.get("title", ""),
+                    o.get("type", "Acquisition"),
+                    o.get("status", "OBSERVED"),
+                    ",".join(str(i) for i in (o.get("evidence_event_ids") or [])),
+                    o.get("note", "")[:60],
+                ]
+            )
+        story.append(_table(orows))
+
     from app.services.investigation import _usb_transfer_answer
 
     story.append(Spacer(1, 8))
@@ -104,7 +139,8 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
     else:
         story.append(
             Paragraph(
-                "No file-copy correlation is available to answer whether confidential data was copied to USB.",
+                "No file-copy correlation is available to answer whether confidential data was copied to USB. "
+                "USB-based confidential data transfer is NOT established by the evidence.",
                 styles["BodyText"],
             )
         )
@@ -117,17 +153,18 @@ def generate_report(case, evidence, artifacts, findings, analysis: dict) -> Path
     story.append(Paragraph("6. Recommended next investigation actions", styles["Heading2"]))
     story.append(
         Paragraph(
-            "These are examiner tasks, not findings of fact. T1567 remains a low-confidence hypothesis.",
+            "Examiner verification tasks derived from evidentiary gaps (NOT ESTABLISHED / INSUFFICIENT EVIDENCE). These are examiner tasks, not findings of fact.",
             styles["Italic"],
         )
     )
-    arows = [["#", "Action", "Reason", "Evidence IDs", "Status"]]
+    arows = [["#", "Investigation Question", "Action / Task", "Why Investigate", "Evidence IDs", "Status"]]
     for a in analysis.get("next_actions") or []:
         arows.append(
             [
                 str(a.get("priority")),
-                (a.get("action") or "")[:36],
-                (a.get("reason") or "")[:55],
+                (a.get("question") or a.get("action") or "")[:28],
+                (a.get("action") or "")[:28],
+                (a.get("reason") or "")[:45],
                 ",".join(str(i) for i in (a.get("evidence_ids") or [])),
                 (a.get("status") or "pending_examiner_verification").replace("_", " "),
             ]
