@@ -73,7 +73,7 @@ def test_policy_driven_automated_collection(tmp_path, db_session):
     ev, report = collector.run_authorized_collection(policy, mode="automated_collection", notes="Test policy run")
 
     assert ev.id is not None
-    assert report.total_files_collected >= 8
+    assert report.total_files_collected >= 15
     assert report.package_sha256 != ""
     assert report.mode == "automated_collection"
 
@@ -86,7 +86,7 @@ def test_policy_driven_automated_collection(tmp_path, db_session):
 
     # Verify artifacts extracted from acquired package
     artifacts = db.query(Artifact).filter(Artifact.case_id == case.id).all()
-    assert len(artifacts) >= 8
+    assert len(artifacts) >= 80
 
     # Verify Common Forensic Event Schema fields
     for a in artifacts:
@@ -95,3 +95,49 @@ def test_policy_driven_automated_collection(tmp_path, db_session):
         assert a.source_type != ""
         assert a.event_type != ""
         assert a.description != ""
+
+
+def test_comprehensive_evidence_volume_with_memory(tmp_path, db_session):
+    db = db_session
+    case = Case(
+        case_number=f"CASE-FULL-{uuid.uuid4().hex[:6].upper()}",
+        title="Comprehensive Full Policy Acquisition Test",
+        description="Testing complete high-volume forensic artifact acquisition",
+        investigator="Senior DFIR Examiner",
+    )
+    db.add(case)
+    db.commit()
+    db.refresh(case)
+
+    policy = AcquisitionPolicy(
+        collect_security_logs=True,
+        collect_system_logs=True,
+        collect_powershell_logs=True,
+        collect_registry=True,
+        collect_browser_history=True,
+        collect_browser_downloads=True,
+        collect_filesystem=True,
+        collect_prefetch=True,
+        collect_amcache=True,
+        collect_network=True,
+        collect_memory=True,
+    )
+
+    collector = AutomatedEvidenceCollector(db, case)
+    ev, report = collector.run_authorized_collection(policy, mode="automated_collection", notes="Full policy capture")
+
+    assert report.total_files_collected >= 20
+    assert report.total_bytes_collected > 20000
+
+    artifacts = db.query(Artifact).filter(Artifact.case_id == case.id).all()
+    assert len(artifacts) >= 100
+
+    # Verify presence of multiple forensic source types
+    sources = {a.source_type for a in artifacts}
+    assert "windows_event" in sources
+    assert "registry" in sources
+    assert "browser" in sources
+    assert "filesystem" in sources
+    assert "network" in sources
+    assert "memory" in sources
+    assert "correlated" in sources
