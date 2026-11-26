@@ -405,6 +405,44 @@ def verify_hash(case_id: int, evidence_id: int, db: Session = Depends(get_db)):
     return {"stored": ev.sha256, "current": current, "ok": ev.integrity_ok}
 
 
+@app.get("/api/cases/{case_id}/evidence/{evidence_id}/download")
+def download_evidence(case_id: int, evidence_id: int, db: Session = Depends(get_db)):
+    """Download acquired or ingested forensic evidence container (.ZIP) with verified hash header."""
+    _case_or_404(db, case_id)
+    ev = db.get(Evidence, evidence_id)
+    if not ev or ev.case_id != case_id:
+        raise HTTPException(404, "Evidence not found")
+    path = Path(ev.stored_path)
+    if not path.is_file():
+        raise HTTPException(404, "Evidence file not found on disk")
+    return FileResponse(
+        path=str(path),
+        filename=ev.filename,
+        media_type="application/zip",
+        headers={"X-Evidence-SHA256": ev.sha256},
+    )
+
+
+@app.get("/api/evidence/sample-package")
+def generate_sample_package(db: Session = Depends(get_db)):
+    """Generate and return a complete verified forensic evidence package ZIP containing all 10 categories."""
+    pkg_file = EVIDENCE_DIR / "DFIS_Complete_Forensic_Evidence.zip"
+    if not pkg_file.is_file():
+        # Generate on the fly
+        import sys
+        sys.path.insert(0, str(Path(__file__).parents[2]))
+        from generate_complete_evidence_zip import build_evidence_package
+        build_evidence_package(pkg_file)
+    digest = sha256_file(pkg_file)
+    return FileResponse(
+        path=str(pkg_file),
+        filename="DFIS_Complete_Forensic_Evidence.zip",
+        media_type="application/zip",
+        headers={"X-Evidence-SHA256": digest},
+    )
+
+
+
 @app.get("/api/cases/{case_id}/timeline")
 def timeline(case_id: int, db: Session = Depends(get_db)):
     _case_or_404(db, case_id)

@@ -252,6 +252,8 @@ export default function Home({ onNavigate }) {
         <a href="/DFIS_Executive_Presentation.pptx" download style={{ color: "#3dffae", textDecoration: "none" }}>Download PPTX</a>
         <span>•</span>
         <a href="/DFIS_Project_Documentation.docx" download style={{ color: "#8fa89d", textDecoration: "none" }}>Download DOCX</a>
+        <span>•</span>
+        <a href="/DFIS_Complete_Forensic_Evidence.zip" download style={{ color: "#3dffae", textDecoration: "none", fontWeight: 700 }}>Download Evidence (.ZIP)</a>
       </footer>
     </div>
   );

@@ -72,7 +72,30 @@ export function IngestModal({ ingestModal, onClose }) {
           </Typography>
         </Paper>
       </DialogContent>
-      <DialogActions sx={{ bgcolor: "#08140f" }}>
+      <DialogActions sx={{ bgcolor: "#08140f", justifyContent: "space-between", px: 2, py: 1.5 }}>
+        {ingestModal.evidence_id ? (
+          <Button
+            component="a"
+            href={`/api/cases/${ingestModal.case_id || 1}/evidence/${ingestModal.evidence_id}/download`}
+            download={ingestModal.filename || "evidence_package.zip"}
+            variant="outlined"
+            size="small"
+            sx={{ borderColor: "rgba(61, 255, 174, 0.3)", color: "#3dffae", fontSize: 11 }}
+          >
+            Download Container (.ZIP)
+          </Button>
+        ) : (
+          <Button
+            component="a"
+            href="/DFIS_Complete_Forensic_Evidence.zip"
+            download
+            variant="outlined"
+            size="small"
+            sx={{ borderColor: "rgba(61, 255, 174, 0.3)", color: "#3dffae", fontSize: 11 }}
+          >
+            Download Package (.ZIP)
+          </Button>
+        )}
         <Button onClick={onClose} variant="contained" sx={{ bgcolor: "#3dffae", color: "#020806", fontWeight: 700 }}>Done</Button>
       </DialogActions>
     </Dialog>
@@ -162,11 +185,22 @@ export function AcquireModal({ open, onClose, acquireMode, setAcquireMode, polic
           ))}
         </Box>
       </DialogContent>
-      <DialogActions sx={{ bgcolor: "#08140f", borderTop: "1px solid rgba(61, 255, 174, 0.1)", p: 2 }}>
-        <Button onClick={onClose} sx={{ color: "#8fa89d" }}>Cancel</Button>
-        <Button onClick={onExecute} variant="contained" sx={{ bgcolor: "#3dffae", color: "#020806", fontWeight: 800 }}>
-          Execute Authorized Acquisition
+      <DialogActions sx={{ bgcolor: "#08140f", borderTop: "1px solid rgba(61, 255, 174, 0.1)", p: 2, justifyContent: "space-between" }}>
+        <Button
+          component="a"
+          href="/DFIS_Complete_Forensic_Evidence.zip"
+          download
+          variant="outlined"
+          sx={{ borderColor: "rgba(61, 255, 174, 0.3)", color: "#3dffae", fontSize: 11 }}
+        >
+          Download Sample Package (.ZIP)
         </Button>
+        <Stack direction="row" spacing={1}>
+          <Button onClick={onClose} sx={{ color: "#8fa89d" }}>Cancel</Button>
+          <Button onClick={onExecute} variant="contained" sx={{ bgcolor: "#3dffae", color: "#020806", fontWeight: 800 }}>
+            Execute Authorized Acquisition
+          </Button>
+        </Stack>
       </DialogActions>
     </Dialog>
   );

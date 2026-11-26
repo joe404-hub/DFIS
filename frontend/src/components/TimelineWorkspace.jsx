@@ -178,6 +178,23 @@ export default function TimelineWorkspace({
             Import
             <input hidden type="file" onChange={(e) => e.target.files[0] && onUploadFile(e.target.files[0])} />
           </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            component="a"
+            href="/DFIS_Complete_Forensic_Evidence.zip"
+            download
+            sx={{
+              fontSize: 10.5,
+              height: 26,
+              px: 1,
+              borderColor: "rgba(61, 255, 174, 0.15)",
+              color: "#8fa89d",
+              "&:hover": { color: "#3dffae", borderColor: "#3dffae" },
+            }}
+          >
+            Sample .ZIP
+          </Button>
         </Stack>
       </Box>
 
